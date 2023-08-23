@@ -1,41 +1,18 @@
+WITH cte_gcp_cost  AS
+  
+(
 SELECT 
-gcp_cost.billing_date,
-autodeploy_cost + (discount_in_aws * percent_autodeploy_aws) as autodeploy_aws,
-(gcp_cost.gcp_cost * percent_autodeploy_aws) as autodeploy_estimation_gcp,
-autodeploy_cost + (gcp_cost.gcp_cost * percent_autodeploy_aws) + (discount_in_aws * percent_autodeploy_aws) as autodeploy_cost,
-number_of_running_hours,
-number_of_runs,
-(autodeploy_cost + (discount_in_aws * percent_autodeploy_aws) + (gcp_cost.gcp_cost * percent_autodeploy_aws))/number_of_running_hours as cost_per_successful_training_running_time,
-(autodeploy_cost + (discount_in_aws * percent_autodeploy_aws) + (gcp_cost.gcp_cost * percent_autodeploy_aws))/number_of_runs as  cost_per_successful_training_count_runs 
-FROM
-(SELECT 
-aws_cost.billing_date,
-autodeploy_cost,
-autodeploy_cost/training_cost as percent_autodeploy_aws,
-IFNULL(discount_per_label,0) as discount_in_aws,
-gcp_cost
-FROM
-(SELECT 
-billing_date,
-SUM(IF (databand_tag = 'Autodeploy', total_cost_aws , 0)) as autodeploy_cost,
-SUM(total_cost_aws) as training_cost
-FROM `trax-ortal-prod.cloud.daily_training_aws`
-GROUP BY 1) aws_cost
-LEFT JOIN 
-(SELECT 
-billing_date,
-SUM(total_cost) as gcp_cost
-FROM `trax-ortal-prod.cloud.daily_training_gcp`
-GROUP BY 1) gcp_cost ON STRING(gcp_cost.billing_date) = aws_cost.billing_date
-LEFT JOIN 
-(SELECT
-billing_date,
-discount_per_label
-FROM `trax-ortal-prod.cloud.edp_discount_aws_cppp_training` as edp_dact
-WHERE cost_allocation = 'training') discount_training ON (discount_training.billing_date = aws_cost.billing_date)
-)
-LEFT JOIN 
-(SELECT 
+billing_gcp_labeled.invoice_month as billing_date,
+EXTRACT(date FROM billing_gcp_labeled.usage_start_time) as date,
+sum(billing_gcp_labeled.cost) as gcp_cost
+FROM `cloud.billing_gcp_labeled` billing_gcp_labeled
+WHERE cost_allocation = 'training'
+AND invoice_month >= '2021-01-01'
+GROUP BY invoice_month, usage_start_time),
+
+cte_autodeploy
+
+SELECT 
 billing_date,
 SUM(number_of_running_hours) AS number_of_running_hours,
 SUM(number_of_runs) AS number_of_runs
@@ -43,3 +20,27 @@ FROM `trax-ortal-prod.cloud.databand_agg`
 WHERE user = 'auto_deploy'
 AND state = 'success'
 GROUP BY 1) autodeploy ON autodeploy.billing_date = STRING(gcp_cost.billing_date)
+
+select
+dr.state,
+cloud,
+user,
+FORMAT_DATETIME('%Y-%m-01',start_time) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',start_time) as date,
+extract(hour from SUM(end_time - start_time)) as number_of_running_hours,
+COUNT(id) as number_of_runs
+from databand_public.dbnd_run dr
+left join (
+select distinct dtrv2.run_id from (select run_id,id from databand_public.dbnd_task_run_v2 where is_system=false ) dtrv2
+join databand_public.dbnd_task_run_attempt dtra on dtra.task_run_id=dtrv2.id
+join (select uid from databand_public.dbnd_error  where msg != 'exiting band due to: Some of datasets created are not valid, look for logs for more info') de on dtra.latest_error_uid = de.uid
+) a on a.run_id=dr.id
+where 1=1 -- dr.user = 'auto_deploy'
+and dag_id = 'AutoTrainPipeline'
+and (dr.state !='failed' or (dr.state ='failed' and a.run_id is not null))
+and dr.start_time >=  '2021-01-01'
+GROUP BY 1,2,3,4,5
+ORDER BY 4,5
+
+
+
