@@ -33,7 +33,7 @@ OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
 OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
 AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
 AND billing_aws_labeled.bill_payer_account_id = '619597279328'
-AND billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
+--AND billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
 GROUP BY
 billing_aws_labeled.bill_billing_period_start_date,
 billing_aws_labeled.identity_time_interval,
@@ -132,12 +132,11 @@ billing_gcp_labeled.invoice_month
 
 cte_task_run_info AS
 (
-SELECT
-dbnd_task_run_v2.run_id,
-dbnd_task_run_v2.id 
-FROM databand_public.dbnd_task_run_v2  dbnd_task_run_v2 
-JOIN databand_public.dbnd_task_run_attempt dbnd_task_run_attempt  on dbnd_task_run_attempt.task_run_id=dbnd_task_run_v2.id
-JOIN (select dbnd_error.uid from databand_public.dbnd_error dbnd_error  where dbnd_error.msg != 'exiting band due to: Some of datasets created are not valid, look for logs for more info') dbnd_error on dbnd_task_run_attempt.latest_error_uid = dbnd_error.uid
+SELECT DISTINCT 
+dbnd_task_run_v2.run_id FROM 
+(select run_id,id FROM databand_public.dbnd_task_run_v2 WHERE is_system=false ) dbnd_task_run_v2
+JOIN databand_public.dbnd_task_run_attempt dbnd_task_run_attempt on dbnd_task_run_attempt.task_run_id=dbnd_task_run_v2.id
+JOIN (SELECT uid FROM databand_public.dbnd_error  WHERE msg != 'exiting band due to: Some of datasets created are not valid, look for logs for more info') dbnd_error ON dbnd_task_run_attempt.latest_error_uid = dbnd_error.uid
 ),
 
 cte_autodeploy AS
