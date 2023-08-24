@@ -114,22 +114,20 @@ FROM cte_aws_cost_total
 GROUP BY billing_date
   ),
 
+
 cte_gcp_cost_training  AS
   
 (
 SELECT 
-'GCP' as cloud,
-'No Tag' as databand_tag,
 billing_gcp_labeled.invoice_month as billing_date,
-EXTRACT(date FROM billing_gcp_labeled.usage_start_time) as date,
 sum(billing_gcp_labeled.cost) as gcp_cost
 FROM `cloud.billing_gcp_labeled` billing_gcp_labeled
 WHERE billing_gcp_labeled.cost_allocation = 'training'
 AND billing_gcp_labeled.invoice_month >= '2021-01-01'
 GROUP BY 
 billing_gcp_labeled.invoice_month, 
-billing_gcp_labeled.usage_start_time
 ),
+
 
 cte_task_run_info AS
 (
@@ -169,44 +167,15 @@ billing_date,
 date
 ),
 
-cte_aws_discount
-
-(SELECT 
-cte_total_cost_distribution.billing_date,
-cte_total_cost_distribution.credit_type,
-cte_total_cost_distribution.actual_cost
-FROM `trax-ortal-prod.cloud.cost_distribution` 
-WHERE cte_total_cost_distribution.project_name = '619597279328'
-AND cte_total_cost_distribution.cloud = 'AWS'
-AND cte_total_cost_distribution.credit_type = 'EdpDiscount'
-),
-
-cte_total_discount  
-
-(SELECT 
-cte_total_cost_distribution.billing_date,
-cte_total_cost_distribution.cost_allocation,
-IF((cte_total_cost_distribution.project_name = '619597279328' AND cte_total_cost_distribution.cloud = 'AWS' AND cte_total_cost_distribution.credit_type = 'EdpDiscount'),0, cte_total_cost_distribution.actual_cost) as actual_cost,
-cte_aws_discount.actual_cost as discount_cost,
-SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cost_distribution.billing_date) as actual_total_cost,
-SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cost_distribution.billing_date) - cte_aws_discount.actual_cost as total_cost_before_dicount
-FROM cte_total_cost_distribution
-LEFT JOIN cte_aws_discount cte_aws_discount.billing_date = cte_total_cost_distribution.billing_date
-WHERE cte_total_cost_distribution.project_name = '619597279328'
-AND cte_total_cost_distribution.cloud = 'AWS')
-
-discount_training AS
+cte_successful_autodeploy AS
 (
-SELECT 
-cte_total_discount.billing_date,
-(cte_total_discount.discount_cost * (SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)))) as discount_per_label
-FROM cte_total_discount
-WHERE cost_allocation = 'training'
-GROUP BY 
-cte_total_discount.billing_date,
-cte_total_discount.cost_allocation,
-cte_total_discount.discount_cost
-),
+cte_autodeploy.billing_date,
+SUM(cte_autodeploy.number_of_running_hours) AS number_of_running_hours,
+SUM(cte_autodeploy.number_of_runs) AS number_of_runs
+FROM cte_autodeploy
+WHERE cte_autodeploy.state = 'success'
+cte_autodeploy.billing_date
+)
 
 cte_gcp_cost_distribution  AS
   
@@ -281,6 +250,80 @@ cte_aws_cost_discount.actual_cost,
 cte_aws_cost_discount.cloud
 FROM cte_aws_cost_distribution cte_aws_cost_distribution 
 ),
+
+cte_aws_discount
+
+(SELECT 
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.credit_type,
+cte_total_cost_distribution.actual_cost
+FROM `trax-ortal-prod.cloud.cost_distribution` 
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+AND cte_total_cost_distribution.credit_type = 'EdpDiscount'
+),
+      
+cte_total_discount  
+
+(SELECT 
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.cost_allocation,
+IF((cte_total_cost_distribution.project_name = '619597279328' AND cte_total_cost_distribution.cloud = 'AWS' AND cte_total_cost_distribution.credit_type = 'EdpDiscount'),0, cte_total_cost_distribution.actual_cost) as actual_cost,
+cte_aws_discount.actual_cost as discount_cost,
+SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cost_distribution.billing_date) as actual_total_cost,
+SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cost_distribution.billing_date) - cte_aws_discount.actual_cost as total_cost_before_dicount
+FROM cte_total_cost_distribution
+LEFT JOIN cte_aws_discount cte_aws_discount.billing_date = cte_total_cost_distribution.billing_date
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+),
+
+cte_discount_training AS
+(
+SELECT 
+cte_total_discount.billing_date,
+(cte_total_discount.discount_cost * (SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)))) as discount_per_label
+FROM cte_total_discount
+WHERE cost_allocation = 'training'
+GROUP BY 
+cte_total_discount.billing_date
+),
+
+cte_aws_gcp_cost_training_final
+(SELECT 
+cte_aws_cost_training.billing_date,
+cte_aws_cost_training.autodeploy_cost,
+cte_aws_cost_training.autodeploy_cost/cte_aws_cost_training.training_cost as percent_autodeploy_aws,
+IFNULL(cte_discount_training.discount_per_label,0) as discount_in_aws,
+gcp_cost
+FROM cte_aws_cost_training cte_aws_cost_training 
+LEFT JOIN cte_gcp_cost_training cte_gcp_cost_training ON STRING(cte_gcp_cost_training.billing_date) = cte_aws_cost_training.billing_date
+LEFT JOIN cte_discount_training cte_discount_training ON cte_discount_training .billing_date = aws_cost.billing_date)
+
+SELECT 
+cte_aws_gcp_cost_training_final.billing_date,
+cte_aws_gcp_cost_training_final.autodeploy_cost + (cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_aws,
+(cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_estimation_gcp,
+cte_aws_gcp_cost_training_final.autodeploy_cost + (cte_aws_gcp_cost_training_final.gcp_cost * percent_autodeploy_aws) + (cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_cost,
+cte_successful_autodeploy.number_of_running_hours,
+cte_successful_autodeploy.number_of_runs,
+(cte_aws_gcp_cost_training_final.autodeploy_cost + 
+(cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) + 
+(cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws))
+/cte_aws_gcp_cost_training_final.number_of_running_hours as cost_per_successful_training_running_time,
+(cte_aws_gcp_cost_training_final.autodeploy_cost + 
+(cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) + 
+(cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws))
+/cte_successful_autodeploy.number_of_runs as  cost_per_successful_training_count_runs 
+FROM cte_aws_gcp_cost_training_final cte_aws_gcp_cost_training_final
+LEFT JOIN cte_successful_autodeploy ON cte_successful_autodeploy.billing_date = STRING(cte_aws_gcp_cost_training_final.billing_date)
+
+
+
+
+
+
+
 
 
 
