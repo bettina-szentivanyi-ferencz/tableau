@@ -1,0 +1,282 @@
+WITH 
+
+cte_aws_cost_training AS
+(
+SELECT
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+  SUM(
+    IF( 
+        (lower(billing_aws_labeled.resource_tags_user_name) NOT LIKE '%research%'
+        AND lower(billing_aws_labeled.resource_tags_user_service) NOT LIKE '%research%'
+        AND lower(billing_aws_labeled.resource_tags_user_name) NOT LIKE '%prod-serving-training%' 
+        AND lower(billing_aws_labeled.resource_tags_user_name) NOT LIKE '%engine-dev%' 
+        AND (lower(billing_aws_labeled.resource_tags_user_name) LIKE '%autocoach%' 
+        OR lower(billing_aws_labeled.resource_tags_user_name) LIKE '%databand%' 
+        OR lower(billing_aws_labeled.resource_tags_user_service) LIKE '%databand%' 
+        OR lower(billing_aws_labeled.resource_tags_user_name) LIKE '%simon%' 
+        OR lower(billing_aws_labeled.resource_tags_user_name) LIKE '%tester%' 
+        OR lower(billing_aws_labeled.resource_tags_user_name) LIKE '%training%' 
+        OR lower(billing_aws_labeled.resource_tags_user_service) LIKE '%training%')
+        AND lower(billing_aws_labeled.resource_tags_user_service) NOT LIKE '%trainer%' 
+        AND lower(billing_aws_labeled.resource_tags_user_service) NOT LIKE '%trainer%' 
+        AND lower(billing_aws_labeled.resource_tags_user_service) NOT LIKE '%prod-autocoach-simon-cpu-on-demand-eks_asg%')
+        AND billing_aws_labeled.cost_allocation = 'training',
+            (CASE
+            WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+            savings_plan_savings_plan_effective_cost
+            WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+            (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+            WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+            0
+            WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+            0
+            WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+            billing_aws_labeled.reservation_effective_cost
+            WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+            (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+            WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+            AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN 0
+            ELSE billing_aws_labeled.line_item_unblended_cost END),0)) as autodeploy_cost,
+  SUM( 
+    IF(
+        (billing_aws_labeled.line_item_usage_account_id = '619597279328'
+        AND billing_aws_labeled.product_servicename = 'AWS Data Transfer'
+        AND (billing_aws_labeled.line_item_usage_type LIKE '%DataTransfer-Out-Bytes%'
+        OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
+        OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
+        AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
+        AND billing_aws_labeled.bill_payer_account_id = '619597279328')
+        OR billing_aws_labeled.cost_allocation = 'training', 
+          (CASE
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+          savings_plan_savings_plan_effective_cost
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+          (billing_aws_labeled.savings_plan_total_commitment_to_date - savings_plan_used_commitment)
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+          0
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+          0
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+          billing_aws_labeled.reservation_effective_cost
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+          (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+          WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+          0
+          ELSE billing_aws_labeled.line_item_unblended_cost END),0)) as training_cost
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE 1=1
+AND FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) >= '2021-01-01'
+GROUP BY billing_aws_labeled.bill_billing_period_start_date
+ORDER BY
+billing_aws_labeled.bill_billing_period_start_date
+),
+
+
+cte_gcp_cost_training  AS
+  
+(
+SELECT 
+billing_gcp_labeled.invoice_month as billing_date,
+sum(billing_gcp_labeled.cost) as gcp_cost
+FROM `cloud.billing_gcp_labeled` billing_gcp_labeled
+WHERE billing_gcp_labeled.cost_allocation = 'training'
+AND billing_gcp_labeled.invoice_month >= '2021-01-01'
+GROUP BY 
+billing_gcp_labeled.invoice_month
+),
+
+
+cte_task_run_info AS
+(
+SELECT DISTINCT 
+dbnd_task_run_v2.run_id FROM 
+(select run_id,id FROM databand_public.dbnd_task_run_v2 WHERE is_system=false ) dbnd_task_run_v2
+JOIN databand_public.dbnd_task_run_attempt dbnd_task_run_attempt on dbnd_task_run_attempt.task_run_id=dbnd_task_run_v2.id
+JOIN (SELECT uid FROM databand_public.dbnd_error  WHERE msg != 'exiting band due to: Some of datasets created are not valid, look for logs for more info') dbnd_error ON dbnd_task_run_attempt.latest_error_uid = dbnd_error.uid
+),
+
+cte_autodeploy AS
+(
+SELECT 
+dbnd_run.state,
+dbnd_run.cloud,
+dbnd_run.user,
+FORMAT_DATETIME('%Y-%m-01',dbnd_run.start_time) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',dbnd_run.start_time) as date,
+extract(hour from SUM(dbnd_run.end_time - dbnd_run.start_time)) as number_of_running_hours,
+COUNT(dbnd_run.id) as number_of_runs
+FROM 
+`trax-ortal-prod.databand_public.dbnd_run`  dbnd_run
+LEFT JOIN cte_task_run_info on cte_task_run_info.run_id=dbnd_run.id
+WHERE dbnd_run.user = 'auto_deploy'
+AND dbnd_run.dag_id = 'AutoTrainPipeline'
+AND (dbnd_run.state !='failed' or (dbnd_run.state ='failed' and cte_task_run_info.run_id is not null))
+AND dbnd_run.start_time >=  '2021-01-01'
+GROUP BY 
+dbnd_run.state,
+dbnd_run.cloud,
+dbnd_run.user,
+billing_date,
+date
+ORDER BY
+billing_date,
+date
+),
+
+cte_successful_autodeploy AS
+(
+SELECT
+cte_autodeploy.billing_date,
+SUM(cte_autodeploy.number_of_running_hours) AS number_of_running_hours,
+SUM(cte_autodeploy.number_of_runs) AS number_of_runs
+FROM cte_autodeploy
+WHERE cte_autodeploy.state = 'success'
+GROUP BY
+cte_autodeploy.billing_date
+),
+
+cte_gcp_cost_distribution  AS
+  
+(SELECT
+FORMAT_DATETIME('%Y-%m-01',billing_gcp_labeled.invoice_month) as billing_date,
+project.id as project_name,
+credits.type as credit_type,
+billing_gcp_labeled.cost_allocation,
+SUM(billing_gcp_labeled.cost) + SUM(IFNULL(credits.amount, 0)) as actual_cost,
+'GCP' as cloud
+FROM cloud.billing_gcp_labeled billing_gcp_labeled
+LEFT JOIN UNNEST(credits) as credits
+WHERE billing_gcp_labeled.invoice_month >= '2021-01-01'
+AND lower(sku.description) NOT LIKE '%tax%'
+GROUP BY 
+billing_date,
+project_name,
+credit_type,
+billing_gcp_labeled.cost_allocation
+),
+
+cte_aws_cost_distribution  AS
+
+(SELECT 
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+billing_aws_labeled.line_item_usage_account_id as project_name,
+billing_aws_labeled.line_item_line_item_type as credit_type,
+billing_aws_labeled.cost_allocation,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      billing_aws_labeled.savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as actual_cost,
+'AWS' as cloud 
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE  billing_aws_labeled.line_item_line_item_type != 'Tax'
+GROUP BY
+billing_date,
+billing_aws_labeled.line_item_usage_account_id,
+billing_aws_labeled.line_item_line_item_type,
+billing_aws_labeled.cost_allocation
+),
+
+cte_total_cost_distribution  AS
+
+(
+(SELECT 
+cte_gcp_cost_distribution.billing_date,
+cte_gcp_cost_distribution.project_name,
+cte_gcp_cost_distribution.credit_type,
+cte_gcp_cost_distribution.cost_allocation,
+cte_gcp_cost_distribution.actual_cost,
+cte_gcp_cost_distribution.cloud
+FROM cte_gcp_cost_distribution cte_gcp_cost_distribution)
+UNION ALL
+(SELECT
+cte_aws_cost_distribution.billing_date,
+cte_aws_cost_distribution.project_name,
+cte_aws_cost_distribution.credit_type,
+cte_aws_cost_distribution.cost_allocation,
+cte_aws_cost_distribution.actual_cost,
+cte_aws_cost_distribution.cloud
+FROM cte_aws_cost_distribution cte_aws_cost_distribution 
+)
+),
+
+cte_aws_discount AS
+
+(SELECT 
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.credit_type,
+cte_total_cost_distribution.actual_cost
+FROM cte_total_cost_distribution cte_total_cost_distribution
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+AND cte_total_cost_distribution.credit_type = 'EdpDiscount'
+),
+      
+cte_total_discount  AS
+
+(SELECT 
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.cost_allocation,
+IF((cte_total_cost_distribution.project_name = '619597279328' AND cte_total_cost_distribution.cloud = 'AWS' AND cte_total_cost_distribution.credit_type = 'EdpDiscount'),0, cte_total_cost_distribution.actual_cost) as actual_cost,
+cte_aws_discount.actual_cost as discount_cost,
+SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cte_total_cost_distribution.billing_date) as actual_total_cost,
+SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cte_total_cost_distribution.billing_date) - cte_aws_discount.actual_cost as total_cost_before_dicount
+FROM cte_total_cost_distribution
+LEFT JOIN cte_aws_discount cte_aws_discount ON cte_aws_discount.billing_date = cte_total_cost_distribution.billing_date
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+),
+
+cte_discount_training AS
+(
+SELECT 
+cte_total_discount.billing_date,
+(cte_total_discount.discount_cost * (SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)))) as discount_per_label
+FROM cte_total_discount cte_total_discount
+WHERE cost_allocation = 'training'
+GROUP BY 
+cte_total_discount.billing_date,
+cte_total_discount.discount_cost
+),
+
+cte_aws_gcp_cost_training_final AS
+(SELECT 
+cte_aws_cost_training.billing_date,
+cte_aws_cost_training.autodeploy_cost,
+cte_aws_cost_training.autodeploy_cost/cte_aws_cost_training.training_cost as percent_autodeploy_aws,
+IFNULL(cte_discount_training.discount_per_label,0) as discount_in_aws,
+gcp_cost
+FROM cte_aws_cost_training cte_aws_cost_training 
+LEFT JOIN cte_gcp_cost_training cte_gcp_cost_training ON STRING(cte_gcp_cost_training.billing_date) = cte_aws_cost_training.billing_date
+LEFT JOIN cte_discount_training cte_discount_training ON cte_discount_training .billing_date = cte_aws_cost_training.billing_date)
+
+SELECT 
+cte_aws_gcp_cost_training_final.billing_date,
+cte_aws_gcp_cost_training_final.autodeploy_cost + (cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_aws,
+(cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_estimation_gcp,
+cte_aws_gcp_cost_training_final.autodeploy_cost + (cte_aws_gcp_cost_training_final.gcp_cost * percent_autodeploy_aws) + (cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_cost,
+cte_successful_autodeploy.number_of_running_hours,
+cte_successful_autodeploy.number_of_runs,
+(cte_aws_gcp_cost_training_final.autodeploy_cost + 
+(cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) + 
+(cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws))
+/cte_successful_autodeploy.number_of_running_hours as cost_per_successful_training_running_time,
+(cte_aws_gcp_cost_training_final.autodeploy_cost + 
+(cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) + 
+(cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws))
+/cte_successful_autodeploy.number_of_runs as  cost_per_successful_training_count_runs 
+FROM cte_aws_gcp_cost_training_final cte_aws_gcp_cost_training_final
+LEFT JOIN cte_successful_autodeploy ON cte_successful_autodeploy.billing_date = cte_aws_gcp_cost_training_final.billing_date
