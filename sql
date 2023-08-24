@@ -1,6 +1,4 @@
-WITH 
-
-cte_aws_cost_network_training  AS
+WITH cte_aws_cost_network_training  AS
 (SELECT
 FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
 FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
@@ -33,11 +31,11 @@ OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
 OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
 AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
 AND billing_aws_labeled.bill_payer_account_id = '619597279328'
-WHERE billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
+AND billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
 GROUP BY
-billing_date,
-date
-cloud)
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.identity_time_interval,
+cloud),
 
 cte_aws_cost_others_training  AS
 (SELECT 
@@ -87,30 +85,31 @@ cloud,
 databand_tag
 ),
 
-cte_total_cost_training 
-  AS
-(billing_date,
- date,
- cloud,
- databand_tag
- total_cost_aws
-  from cte_aws_cost_network_training 
+cte_total_cost_training  AS
+(
+  (SELECT
+cte_aws_cost_network_training.billing_date,
+ cte_aws_cost_network_training.date,
+ cte_aws_cost_network_training.cloud,
+ cte_aws_cost_network_training.databand_tag,
+ cte_aws_cost_network_training.total_cost_aws
+  from cte_aws_cost_network_training cte_aws_cost_network_training)
   UNION ALL
   (select 
- billing_date,
- date,
- cloud,
- databand_tag
- total_cost_aws
-from cte_aws_cost_others_training)
+ cte_aws_cost_others_training.billing_date,
+ cte_aws_cost_others_training.date,
+ cte_aws_cost_others_training.cloud,
+ cte_aws_cost_others_training.databand_tag,
+ cte_aws_cost_others_training.total_cost_aws
+from cte_aws_cost_others_training cte_aws_cost_others_training)
 ),
 
 cte_aws_cost_training AS
   (SELECT 
-cte_aws_cost_total.billing_date,
-SUM(IF (cte_aws_cost_total.databand_tag = 'Autodeploy', cte_aws_cost_total.total_cost_aws , 0)) as autodeploy_cost,
-SUM(cte_aws_cost_total.total_cost_aws_training ) as training_cost
-FROM cte_aws_cost_total
+cte_total_cost_training.billing_date,
+SUM(IF (cte_total_cost_training.databand_tag = 'Autodeploy', cte_aws_cost_total.total_cost_aws , 0)) as autodeploy_cost,
+SUM(cte_total_cost_training.total_cost_aws ) as training_cost
+FROM cte_total_cost_training
 GROUP BY billing_date
   ),
 
@@ -125,7 +124,7 @@ FROM `cloud.billing_gcp_labeled` billing_gcp_labeled
 WHERE billing_gcp_labeled.cost_allocation = 'training'
 AND billing_gcp_labeled.invoice_month >= '2021-01-01'
 GROUP BY 
-billing_gcp_labeled.invoice_month, 
+billing_gcp_labeled.invoice_month
 ),
 
 
@@ -169,17 +168,20 @@ date
 
 cte_successful_autodeploy AS
 (
+SELECT
 cte_autodeploy.billing_date,
 SUM(cte_autodeploy.number_of_running_hours) AS number_of_running_hours,
 SUM(cte_autodeploy.number_of_runs) AS number_of_runs
 FROM cte_autodeploy
 WHERE cte_autodeploy.state = 'success'
+GROUP BY
 cte_autodeploy.billing_date
-)
+),
 
 cte_gcp_cost_distribution  AS
   
-(SELECT
+(
+SELECT
 FORMAT_DATETIME('%Y-%m-01',billing_gcp_labeled.invoice_month) as billing_date,
 project.id as project_name,
 credits.type as credit_type,
@@ -232,7 +234,7 @@ billing_aws_labeled.cost_allocation
 ),
 
 cte_total_cost_distribution  AS
-
+(
 (SELECT 
 cte_gcp_cost_discount.billing_date,
 cte_gcp_cost_discount.project_name,
@@ -240,18 +242,20 @@ cte_gcp_cost_discount.credit_type,
 cte_gcp_cost_discountcost_allocation,
 cte_gcp_cost_discount.actual_cost,
 cte_gcp_cost_discount.cloud
-FROM cte_gcp_cost_distribution cte_gcp_cost_distribution
+FROM cte_gcp_cost_distribution cte_gcp_cost_distribution)
 UNION ALL
+(
+SELECT
 cte_aws_cost_discount.billing_date,
 cte_aws_cost_discount.project_name,
 cte_aws_cost_discount.credit_type,
 cte_aws_cost_discount.cost_allocation,
 cte_aws_cost_discount.actual_cost,
 cte_aws_cost_discount.cloud
-FROM cte_aws_cost_distribution cte_aws_cost_distribution 
+FROM cte_aws_cost_distribution cte_aws_cost_distribution )
 ),
 
-cte_aws_discount
+cte_aws_discount AS
 
 (SELECT 
 cte_total_cost_distribution.billing_date,
@@ -263,7 +267,7 @@ AND cte_total_cost_distribution.cloud = 'AWS'
 AND cte_total_cost_distribution.credit_type = 'EdpDiscount'
 ),
       
-cte_total_discount  
+cte_total_discount  AS
 
 (SELECT 
 cte_total_cost_distribution.billing_date,
@@ -273,7 +277,7 @@ cte_aws_discount.actual_cost as discount_cost,
 SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cost_distribution.billing_date) as actual_total_cost,
 SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cost_distribution.billing_date) - cte_aws_discount.actual_cost as total_cost_before_dicount
 FROM cte_total_cost_distribution
-LEFT JOIN cte_aws_discount cte_aws_discount.billing_date = cte_total_cost_distribution.billing_date
+LEFT JOIN cte_aws_discount cte_aws_discount ON cte_aws_discount.billing_date = cte_total_cost_distribution.billing_date
 WHERE cte_total_cost_distribution.project_name = '619597279328'
 AND cte_total_cost_distribution.cloud = 'AWS'
 ),
@@ -289,7 +293,7 @@ GROUP BY
 cte_total_discount.billing_date
 ),
 
-cte_aws_gcp_cost_training_final
+cte_aws_gcp_cost_training_final AS
 (SELECT 
 cte_aws_cost_training.billing_date,
 cte_aws_cost_training.autodeploy_cost,
