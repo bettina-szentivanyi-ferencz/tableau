@@ -124,7 +124,7 @@ billing_date,
 date
 ),
 
-cte_successful_autodeploy AS
+cte_successful_autodeploy AS -- cannot be simplified because number_of_running_hours is changing if aggregation is modified 
 (
 SELECT
 cte_autodeploy.billing_date,
@@ -230,7 +230,9 @@ cte_total_discount  AS
 (SELECT 
 cte_total_cost_distribution.billing_date,
 cte_total_cost_distribution.cost_allocation,
-IF((cte_total_cost_distribution.project_name = '619597279328' AND cte_total_cost_distribution.cloud = 'AWS' AND cte_total_cost_distribution.credit_type = 'EdpDiscount'),0, cte_total_cost_distribution.actual_cost) as actual_cost,
+IF((cte_total_cost_distribution.project_name = '619597279328' 
+    AND cte_total_cost_distribution.cloud = 'AWS' 
+    AND cte_total_cost_distribution.credit_type = 'EdpDiscount'),0, cte_total_cost_distribution.actual_cost) as actual_cost,
 cte_aws_discount.actual_cost as discount_cost,
 SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cte_total_cost_distribution.billing_date) as actual_total_cost,
 SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cte_total_cost_distribution.billing_date) - cte_aws_discount.actual_cost as total_cost_before_dicount
