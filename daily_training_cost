@@ -1,0 +1,164 @@
+WITH aws_list_of_dates_by_month_year AS
+
+(
+
+SELECT
+    FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date_full,
+    FORMAT_DATETIME('%Y-%m-01',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date_month,
+    FROM `cloud.billing_aws_labeled` billing_aws_labeled
+    GROUP BY 
+    date_full,
+    date_month   
+),
+
+aws_number_of_days AS 
+(
+SELECT
+    aws_list_of_dates_by_month_year.date_month,
+    aws_list_of_dates_by_month_year.date_full,
+    COUNT(aws_list_of_dates_by_month_year.date_full) OVER(PARTITION BY aws_list_of_dates_by_month_year.date_month) as number_of_days
+    FROM aws_list_of_dates_by_month_year
+    GROUP BY 
+    aws_list_of_dates_by_month_year.date_month,
+    aws_list_of_dates_by_month_year.date_full ),
+
+cte_gcp_cost_distribution  AS
+  
+(SELECT
+FORMAT_DATETIME('%Y-%m-01',billing_gcp_labeled.invoice_month) as billing_date,
+project.id as project_name,
+credits.type as credit_type,
+billing_gcp_labeled.cost_allocation,
+SUM(billing_gcp_labeled.cost) + SUM(IFNULL(credits.amount, 0)) as actual_cost,
+'GCP' as cloud
+FROM cloud.billing_gcp_labeled billing_gcp_labeled
+LEFT JOIN UNNEST(credits) as credits
+WHERE billing_gcp_labeled.invoice_month >= '2021-01-01'
+AND lower(sku.description) NOT LIKE '%tax%'
+GROUP BY 
+billing_date,
+project_name,
+credit_type,
+billing_gcp_labeled.cost_allocation
+),
+
+cte_aws_cost_distribution  AS
+
+(SELECT 
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+billing_aws_labeled.line_item_usage_account_id as project_name,
+billing_aws_labeled.line_item_line_item_type as credit_type,
+billing_aws_labeled.cost_allocation,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      billing_aws_labeled.savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as actual_cost,
+'AWS' as cloud 
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE  billing_aws_labeled.line_item_line_item_type != 'Tax'
+GROUP BY
+billing_date,
+billing_aws_labeled.line_item_usage_account_id,
+billing_aws_labeled.line_item_line_item_type,
+billing_aws_labeled.cost_allocation
+),
+
+cte_total_cost_distribution  AS
+
+(
+(SELECT 
+cte_gcp_cost_distribution.billing_date,
+cte_gcp_cost_distribution.project_name,
+cte_gcp_cost_distribution.credit_type,
+cte_gcp_cost_distribution.cost_allocation,
+cte_gcp_cost_distribution.actual_cost,
+cte_gcp_cost_distribution.cloud
+FROM cte_gcp_cost_distribution cte_gcp_cost_distribution)
+UNION ALL
+(SELECT
+cte_aws_cost_distribution.billing_date,
+cte_aws_cost_distribution.project_name,
+cte_aws_cost_distribution.credit_type,
+cte_aws_cost_distribution.cost_allocation,
+cte_aws_cost_distribution.actual_cost,
+cte_aws_cost_distribution.cloud
+FROM cte_aws_cost_distribution cte_aws_cost_distribution 
+)
+),
+
+cte_aws_discount AS
+
+(SELECT 
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.credit_type,
+cte_total_cost_distribution.actual_cost
+FROM cte_total_cost_distribution cte_total_cost_distribution
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+AND cte_total_cost_distribution.credit_type = 'EdpDiscount'
+),
+      
+cte_total_discount  AS
+
+(SELECT 
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.cost_allocation,
+IF((cte_total_cost_distribution.project_name = '619597279328' AND cte_total_cost_distribution.cloud = 'AWS' AND cte_total_cost_distribution.credit_type = 'EdpDiscount'),0, cte_total_cost_distribution.actual_cost) as actual_cost,
+cte_aws_discount.actual_cost as discount_cost,
+SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cte_total_cost_distribution.billing_date) as actual_total_cost,
+SUM(cte_total_cost_distribution.actual_cost) OVER(PARTITION BY cte_total_cost_distribution.billing_date) - cte_aws_discount.actual_cost as total_cost_before_dicount
+FROM cte_total_cost_distribution
+LEFT JOIN cte_aws_discount cte_aws_discount ON cte_aws_discount.billing_date = cte_total_cost_distribution.billing_date
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+),
+
+cte_discount_training AS
+(
+SELECT 
+cte_total_discount.billing_date,
+(cte_total_discount.discount_cost * (SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)))) as discount_per_label
+FROM cte_total_discount cte_total_discount
+WHERE cost_allocation = 'training'
+GROUP BY 
+cte_total_discount.billing_date,
+cte_total_discount.discount_cost
+),
+
+cte_discount_size AS
+(
+SELECT
+    cte_discount_training.billing_date,
+    aws_number_of_days.date_full,
+    aws_number_of_days.number_of_days,
+    SUM(cte_discount_training.discount_per_label) as discount_size
+    FROM cte_discount_training 
+     LEFT JOIN aws_number_of_days ON aws_number_of_days.date_month = edp_dact.billing_date
+    GROUP BY
+    cte_discount_training.billing_date,
+    aws_number_of_days.date_full,
+    aws_number_of_days.number_of_days),
+
+cte_discount_per_day AS
+
+(
+SELECT 
+    billing_date,
+    date_full,
+    IFNULL((discount_size/ number_of_days),0) AS discount_per_day
+FROM cte_discount_size),
+
+daily_training_cost
