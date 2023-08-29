@@ -146,7 +146,7 @@ SELECT
     aws_number_of_days.number_of_days,
     SUM(cte_discount_training.discount_per_label) as discount_size
     FROM cte_discount_training 
-     LEFT JOIN aws_number_of_days ON aws_number_of_days.date_month = edp_dact.billing_date
+     LEFT JOIN aws_number_of_days ON aws_number_of_days.date_month = cte_discount_training.billing_date
     GROUP BY
     cte_discount_training.billing_date,
     aws_number_of_days.date_full,
@@ -161,4 +161,186 @@ SELECT
     IFNULL((discount_size/ number_of_days),0) AS discount_per_day
 FROM cte_discount_size),
 
-daily_training_cost
+cte_aws_cost_network_training  AS
+(SELECT
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
+'AWS' as cloud,
+'Network' as databand_tag,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as total_cost_aws
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE 1=1
+AND FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) >= '2021-01-01'
+AND billing_aws_labeled.line_item_usage_account_id = '619597279328'
+AND billing_aws_labeled.product_servicename = 'AWS Data Transfer'
+AND (billing_aws_labeled.line_item_usage_type LIKE '%DataTransfer-Out-Bytes%'
+OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
+OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
+AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
+AND billing_aws_labeled.bill_payer_account_id = '619597279328'
+--AND billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
+GROUP BY
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.identity_time_interval,
+cloud,
+databand_tag),
+
+cte_aws_cost_others_training  AS
+(SELECT 
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
+'AWS' as cloud,
+CASE when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%research%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%research%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%prod-serving-training%' THEN 'Prod_Serving'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%engine-dev%' THEN 'Engine_Dev'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%autocoach%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%databand%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%databand%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%simon%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%tester%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%training%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%training%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%trainer%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%trainer%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%prod-autocoach-simon-cpu-on-demand-eks_asg%' THEN 'Platform Training Cost'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%prod-autocoach%' THEN 'Platform Training Cost'
+ELSE 'Platform Training Cost' END AS databand_tag,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as total_cost_aws
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE billing_aws_labeled.cost_allocation = 'training'
+AND FORMAT_DATETIME('%Y-%m-01',bill_billing_period_start_date) >= '2021-01-01'
+GROUP BY 
+billing_date,
+date,
+cloud,
+databand_tag
+),
+
+cte_total_aws_cost_training  AS
+(
+(SELECT
+ cte_aws_cost_network_training.billing_date,
+ cte_aws_cost_network_training.date,
+ cte_aws_cost_network_training.cloud,
+ cte_aws_cost_network_training.databand_tag,
+ cte_aws_cost_network_training.total_cost_aws
+  from cte_aws_cost_network_training cte_aws_cost_network_training)
+  UNION ALL
+  (SELECT 
+ cte_aws_cost_others_training.billing_date,
+ cte_aws_cost_others_training.date,
+ cte_aws_cost_others_training.cloud,
+ cte_aws_cost_others_training.databand_tag,
+ cte_aws_cost_others_training.total_cost_aws
+from cte_aws_cost_others_training cte_aws_cost_others_training)
+),
+
+daily_aws_training_cost AS
+(
+SELECT 
+DATE(cte_total_aws_cost_training.billing_date) as billing_date,
+DATE(cte_total_aws_cost_training.date) as date,
+cte_total_aws_cost_training.cloud,
+cte_total_aws_cost_training.databand_tag,
+cte_discount_per_day.discount_per_day * (cte_total_aws_cost_training.total_cost_aws/ (SUM(cte_total_aws_cost_training.total_cost_aws) OVER(PARTITION BY date))) as discount_per_day,
+cte_total_aws_cost_training.total_cost_aws as daily_cost_without_discount,
+(cte_discount_per_day.discount_per_day * (cte_total_aws_cost_training.total_cost_aws/ (SUM(cte_total_aws_cost_training.total_cost_aws) OVER(PARTITION BY date)))) + cte_total_aws_cost_training.total_cost_aws as daily_cost
+FROM cte_total_aws_cost_training cte_total_aws_cost_training
+LEFT JOIN cte_discount_per_day cte_discount_per_day on cte_total_aws_cost_training.date=cte_discount_per_day.date_full
+GROUP BY 
+cte_total_aws_cost_training.billing_date,
+cte_total_aws_cost_training.date,
+cte_total_aws_cost_training.cloud,
+cte_total_aws_cost_training.databand_tag,
+cte_discount_per_day.discount_per_day,
+cte_total_aws_cost_training.total_cost_aws),
+
+gcp_training_cost AS
+(
+SELECT 
+billing_gcp_labeled.invoice_month as billing_date,
+EXTRACT(date FROM billing_gcp_labeled.usage_start_time) as date,
+'GCP' as cloud,
+'No Tag' as databand_tag,
+sum(billing_gcp_labeled.cost) as cost
+FROM cloud.billing_gcp_labeled billing_gcp_labeled
+WHERE cost_allocation = 'training'
+AND invoice_month >= '2021-01-01'
+GROUP BY 
+billing_date,
+date),
+
+daily_gcp_training_cost AS
+(
+SELECT 
+DATE(FORMAT_DATETIME('%Y-%m-01' ,DATE(IF ((EXTRACT(MONTH from billing_date) = EXTRACT(MONTH from date)), billing_date, date)))) as billing_date,
+date,
+'GCP' as cloud,
+'No Tag' as databand_tag,
+0 as discount_per_day,
+sum(cost) as daily_cost_without_discount,
+0 + SUM(cost) as daily_cost
+FROM gcp_training_cost
+GROUP BY 
+billing_date,
+date,
+cloud,
+databand_tag,
+discount_per_day)
+
+
+(SELECT 
+daily_aws_training_cost.billing_date,
+daily_aws_training_cost.date,
+daily_aws_training_cost.cloud,
+daily_aws_training_cost.databand_tag, 
+daily_aws_training_cost.discount_per_day, 
+daily_aws_training_cost.daily_cost_without_discount,
+daily_aws_training_cost.daily_cost
+from daily_aws_training_cost
+where date ='2023-08-03')
+UNION ALL
+(SELECT
+daily_gcp_training_cost.billing_date,
+daily_gcp_training_cost.date,
+daily_gcp_training_cost.cloud,
+daily_gcp_training_cost.databand_tag, 
+daily_gcp_training_cost.discount_per_day, 
+daily_gcp_training_cost.daily_cost_without_discount,
+daily_gcp_training_cost.daily_cost
+FROM daily_gcp_training_cost
+where date = '2023-08-03'
+)
