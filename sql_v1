@@ -87,7 +87,7 @@ cloud,
 databand_tag
 ),
 
-cte_total_cost_training  AS
+cte_total_aws_cost_training  AS
 (
 (SELECT
  cte_aws_cost_network_training.billing_date,
@@ -108,10 +108,10 @@ from cte_aws_cost_others_training cte_aws_cost_others_training)
 
 cte_aws_cost_training AS
   (SELECT 
-cte_total_cost_training.billing_date,
-SUM(IF (cte_total_cost_training.databand_tag = 'Autodeploy', cte_total_cost_training.total_cost_aws , 0)) as autodeploy_cost,
-SUM(cte_total_cost_training.total_cost_aws ) as training_cost
-FROM cte_total_cost_training
+cte_total_aws_cost_training.billing_date,
+SUM(IF (cte_total_aws_cost_training.databand_tag = 'Autodeploy', cte_total_aws_cost_training.total_cost_aws , 0)) as autodeploy_cost,
+SUM(cte_total_aws_cost_training.total_cost_aws ) as training_cost
+FROM cte_total_aws_cost_training
 GROUP BY billing_date
   ),
 
@@ -323,3 +323,4 @@ cte_successful_autodeploy.number_of_runs,
 /cte_successful_autodeploy.number_of_runs as  cost_per_successful_training_count_runs 
 FROM cte_aws_gcp_cost_training_final cte_aws_gcp_cost_training_final
 LEFT JOIN cte_successful_autodeploy ON cte_successful_autodeploy.billing_date = cte_aws_gcp_cost_training_final.billing_date
+where cte_aws_gcp_cost_training_final.billing_date between '2023-01-01' and '2023-09-01'
