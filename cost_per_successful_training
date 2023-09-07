@@ -194,7 +194,7 @@ LEFT JOIN UNNEST(credits) as credits
 WHERE billing_gcp_labeled.invoice_month >= '2021-01-01'
 AND lower(sku.description) NOT LIKE '%tax%'
 GROUP BY 
-billing_gcp_labeled.invoice_month
+billing_gcp_labeled.invoice_month,
 project_name,
 credit_type,
 billing_gcp_labeled.cost_allocation
