@@ -101,16 +101,17 @@ FROM cte_aws_cost_distribution cte_aws_cost_distribution
 )
 ),
 
-cte_discount_cost AS
+cte_aws_discount AS
 
 (SELECT 
-billing_date,
-credit_type,
-actual_cost
-FROM cte_total_cost_distribution  
-WHERE project_name = '619597279328'
-AND cloud = 'AWS'
-AND credit_type = 'EdpDiscount'),
+cte_total_cost_distribution.billing_date,
+cte_total_cost_distribution.credit_type,
+cte_total_cost_distribution.actual_cost
+FROM cte_total_cost_distribution cte_total_cost_distribution
+WHERE cte_total_cost_distribution.project_name = '619597279328'
+AND cte_total_cost_distribution.cloud = 'AWS'
+AND cte_total_cost_distribution.credit_type = 'EdpDiscount'
+),
 
 
 cte_total_cost_before_dicount AS
@@ -119,11 +120,11 @@ cte_total_cost_before_dicount AS
 cte_cost_training.billing_date,
 cte_cost_training.cost_allocation,
 IF((cte_cost_training.project_name = '619597279328' AND cte_cost_training.cloud = 'AWS' AND cte_cost_training.credit_type = 'EdpDiscount'),0, cte_cost_training.actual_cost) as actual_cost,
-cte_discount_cost.actual_cost as discount_cost,
+cte_aws_discount.actual_cost as discount_cost,
 SUM(cte_cost_training.actual_cost) OVER(PARTITION BY cte_cost_training.billing_date) as actual_total_cost,
 SUM(cte_cost_training.actual_cost) OVER(PARTITION BY cte_cost_training.billing_date) - cte_discount_cost.actual_cost as total_cost_before_dicount
 FROM cte_cost_training  cte_cost_training 
-LEFT JOIN cte_discount_cost cte_discount_cost ON cte_discount_cost.billing_date = cte_cost_training.billing_date
+LEFT JOIN cte_aws_discount cte_aws_discount ON cte_aws_discount.billing_date = cte_cost_training.billing_date
 WHERE cte_cost_training.project_name = '619597279328'
 AND cte_cost_training.cloud = 'AWS'),
 
