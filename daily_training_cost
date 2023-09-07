@@ -172,7 +172,7 @@ cte_discount_cppp  as
     FROM cte_discount_per_size),
 
 
-te_aws_cost_network_training  AS
+cte_aws_cost_network_training  AS
 (SELECT
 FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
 FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
