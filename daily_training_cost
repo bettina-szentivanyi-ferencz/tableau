@@ -23,8 +23,8 @@ SELECT
     cte_aws_list_of_dates_by_month_year.date_full ),
 
 
-cte_gcp_cost_training AS
-
+cte_gcp_cost_distribution  AS
+  
 (SELECT
 FORMAT_DATETIME('%Y-%m-01',billing_gcp_labeled.invoice_month) as billing_date,
 project.id as project_name,
@@ -36,11 +36,12 @@ FROM cloud.billing_gcp_labeled billing_gcp_labeled
 LEFT JOIN UNNEST(credits) as credits
 WHERE billing_gcp_labeled.invoice_month >= '2021-01-01'
 AND lower(sku.description) NOT LIKE '%tax%'
-GROUP BY
-billing_date,
+GROUP BY 
+billing_gcp_labeled.invoice_month
 project_name,
 credit_type,
-cost_allocation),
+billing_gcp_labeled.cost_allocation
+),
 
 
 cte_aws_cost_training AS
