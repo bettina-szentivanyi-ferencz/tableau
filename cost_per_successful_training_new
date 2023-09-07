@@ -1,0 +1,345 @@
+BEGIN 
+
+CREATE TEMP TABLE aws_cost_network_training_temp AS
+
+(
+  SELECT
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
+'AWS' as cloud,
+'Network' as databand_tag,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      billing_aws_labeled.savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as total_cost_aws
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE 1=1
+AND FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) >= '2021-01-01'
+AND billing_aws_labeled.line_item_usage_account_id = '619597279328'
+AND billing_aws_labeled.product_servicename = 'AWS Data Transfer'
+AND (billing_aws_labeled.line_item_usage_type LIKE '%DataTransfer-Out-Bytes%'
+OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
+OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
+AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
+AND billing_aws_labeled.bill_payer_account_id = '619597279328'
+GROUP BY
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.identity_time_interval,
+cloud,
+databand_tag);
+
+CREATE TEMP TABLE aws_cost_others_training_temp  AS
+(SELECT 
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
+'AWS' as cloud,
+CASE when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%research%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%research%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%prod-serving-training%' THEN 'Prod_Serving'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%engine-dev%' THEN 'Engine_Dev'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%autocoach%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%databand%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%databand%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%simon%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%tester%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_name) LIKE '%training%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%training%' THEN 'Autodeploy'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%trainer%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%trainer%' THEN 'Research'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%prod-autocoach-simon-cpu-on-demand-eks_asg%' THEN 'Platform Training Cost'
+when lower(billing_aws_labeled.resource_tags_user_service) LIKE '%prod-autocoach%' THEN 'Platform Training Cost'
+ELSE 'Platform Training Cost' END AS databand_tag,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as total_cost_aws
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE billing_aws_labeled.cost_allocation = 'training'
+AND FORMAT_DATETIME('%Y-%m-01',bill_billing_period_start_date) >= '2021-01-01'
+GROUP BY 
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.identity_time_interval,
+cloud,
+databand_tag
+);
+
+
+CREATE TEMP TABLE total_aws_cost_training_temp AS
+(
+(SELECT
+ aws_cost_network_training_temp.billing_date,
+ aws_cost_network_training_temp.date,
+ aws_cost_network_training_temp.cloud,
+ aws_cost_network_training_temp.databand_tag,
+ aws_cost_network_training_temp.total_cost_aws
+  from aws_cost_network_training_temp aws_cost_network_training_temp)
+  UNION ALL
+  (SELECT 
+ aws_cost_others_training_temp.billing_date,
+ aws_cost_others_training_temp.date,
+ aws_cost_others_training_temp.cloud,
+ aws_cost_others_training_temp.databand_tag,
+ aws_cost_others_training_temp.total_cost_aws
+from aws_cost_others_training_temp aws_cost_others_training_temp)
+);
+
+
+CREATE TEMP TABLE gcp_cost_distribution_temp  AS
+  
+(SELECT
+FORMAT_DATETIME('%Y-%m-01',billing_gcp_labeled.invoice_month) as billing_date,
+project.id as project_name,
+credits.type as credit_type,
+billing_gcp_labeled.cost_allocation,
+SUM(billing_gcp_labeled.cost) + SUM(IFNULL(credits.amount, 0)) as actual_cost,
+'GCP' as cloud
+FROM cloud.billing_gcp_labeled billing_gcp_labeled
+LEFT JOIN UNNEST(credits) as credits
+WHERE billing_gcp_labeled.invoice_month >= '2021-01-01'
+AND lower(sku.description) NOT LIKE '%tax%'
+GROUP BY 
+billing_date,
+project_name,
+credit_type,
+billing_gcp_labeled.cost_allocation
+);
+
+
+CREATE TEMP TABLE aws_cost_distribution_temp  AS
+
+(SELECT 
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
+billing_aws_labeled.line_item_usage_account_id as project_name,
+billing_aws_labeled.line_item_line_item_type as credit_type,
+billing_aws_labeled.cost_allocation,
+SUM(CASE
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+      billing_aws_labeled.savings_plan_savings_plan_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+      0
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+      billing_aws_labeled.reservation_effective_cost
+      WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+      (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+      WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+          AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+      0
+      ELSE billing_aws_labeled.line_item_unblended_cost END) as actual_cost,
+'AWS' as cloud 
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE  billing_aws_labeled.line_item_line_item_type != 'Tax'
+GROUP BY
+billing_date,
+billing_aws_labeled.line_item_usage_account_id,
+billing_aws_labeled.line_item_line_item_type,
+billing_aws_labeled.cost_allocation
+);
+
+CREATE TEMP TABLE total_cost_distribution_temp  AS
+
+(
+(SELECT 
+gcp_cost_distribution_temp.billing_date,
+gcp_cost_distribution_temp.project_name,
+gcp_cost_distribution_temp.credit_type,
+gcp_cost_distribution_temp.cost_allocation,
+gcp_cost_distribution_temp.actual_cost,
+gcp_cost_distribution_temp.cloud
+FROM gcp_cost_distribution_temp gcp_cost_distribution_temp)
+UNION ALL
+(SELECT
+aws_cost_distribution_temp.billing_date,
+aws_cost_distribution_temp.project_name,
+aws_cost_distribution_temp.credit_type,
+aws_cost_distribution_temp.cost_allocation,
+aws_cost_distribution_temp.actual_cost,
+aws_cost_distribution_temp.cloud
+FROM aws_cost_distribution_temp aws_cost_distribution_temp 
+)
+);
+
+CREATE TEMP TABLE aws_discount_temp AS
+
+(SELECT 
+total_cost_distribution_temp.billing_date,
+total_cost_distribution_temp.credit_type,
+total_cost_distribution_temp.actual_cost
+FROM total_cost_distribution_temp total_cost_distribution_temp
+WHERE total_cost_distribution_temp.project_name = '619597279328'
+AND total_cost_distribution_temp.cloud = 'AWS'
+AND total_cost_distribution_temp.credit_type = 'EdpDiscount'
+);
+      
+CREATE TEMP TABLE total_discount_temp AS
+
+(SELECT 
+total_cost_distribution_temp.billing_date,
+total_cost_distribution_temp.cost_allocation,
+IF((total_cost_distribution_temp.project_name = '619597279328' AND total_cost_distribution_temp.cloud = 'AWS' AND total_cost_distribution_temp.credit_type = 'EdpDiscount'),0, total_cost_distribution_temp.actual_cost) as actual_cost,
+aws_discount_temp.actual_cost as discount_cost,
+SUM(total_cost_distribution_temp.actual_cost) OVER(PARTITION BY total_cost_distribution_temp.billing_date) as actual_total_cost,
+SUM(total_cost_distribution_temp.actual_cost) OVER(PARTITION BY total_cost_distribution_temp.billing_date) - aws_discount_temp.actual_cost as total_cost_before_dicount
+FROM total_cost_distribution_temp
+LEFT JOIN aws_discount_temp aws_discount_temp ON aws_discount_temp.billing_date = total_cost_distribution_temp.billing_date
+WHERE total_cost_distribution_temp.project_name = '619597279328'
+AND total_cost_distribution_temp.cloud = 'AWS'
+);
+
+
+CREATE TEMP TABLE discount_per_label_temp AS
+(
+SELECT 
+total_discount_temp.billing_date,
+total_discount_temp.cost_allocation,
+total_discount_temp.discount_cost,
+SUM(total_discount_temp.actual_cost)/ SUM(DISTINCT(total_discount_temp.total_cost_before_dicount)) as percent_actual_cost,
+(total_discount_temp.discount_cost * (SUM(total_discount_temp.actual_cost)/ SUM(DISTINCT(total_discount_temp.total_cost_before_dicount)))) as discount_per_label
+FROM total_discount_temp
+WHERE cost_allocation = 'training'
+GROUP BY 
+total_discount_temp.billing_date,
+total_discount_temp.cost_allocation,
+total_discount_temp.discount_cost
+);
+
+
+CREATE TEMP TABLE aws_cost_training_temp AS
+
+  (SELECT 
+total_aws_cost_training_temp.billing_date,
+SUM(IF (total_aws_cost_training_temp.databand_tag = 'Autodeploy', total_aws_cost_training_temp.total_cost_aws , 0)) as autodeploy_cost,
+SUM(total_aws_cost_training_temp.total_cost_aws ) as training_cost
+FROM total_aws_cost_training_temp
+GROUP BY billing_date
+  );
+
+
+
+CREATE TEMP TABLE gcp_cost_training_temp  AS
+  
+(
+SELECT 
+billing_gcp_labeled.invoice_month as billing_date,
+sum(billing_gcp_labeled.cost) as gcp_cost
+FROM `cloud.billing_gcp_labeled` billing_gcp_labeled
+WHERE billing_gcp_labeled.cost_allocation = 'training'
+AND billing_gcp_labeled.invoice_month >= '2021-01-01'
+GROUP BY 
+billing_gcp_labeled.invoice_month
+);
+
+
+CREATE TEMP TABLE task_run_info AS
+(
+SELECT DISTINCT 
+dbnd_task_run_v2.run_id FROM 
+(select run_id,id FROM databand_public.dbnd_task_run_v2 WHERE is_system=false ) dbnd_task_run_v2
+JOIN databand_public.dbnd_task_run_attempt dbnd_task_run_attempt on dbnd_task_run_attempt.task_run_id=dbnd_task_run_v2.id
+JOIN (SELECT uid FROM databand_public.dbnd_error  WHERE msg != 'exiting band due to: Some of datasets created are not valid, look for logs for more info') dbnd_error ON dbnd_task_run_attempt.latest_error_uid = dbnd_error.uid
+);
+
+CREATE TEMP TABLE autodeploy_temp AS
+(
+SELECT 
+dbnd_run.state,
+dbnd_run.cloud,
+dbnd_run.user,
+FORMAT_DATETIME('%Y-%m-01',dbnd_run.start_time) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',dbnd_run.start_time) as date,
+extract(hour from SUM(dbnd_run.end_time - dbnd_run.start_time)) as number_of_running_hours,
+COUNT(dbnd_run.id) as number_of_runs
+FROM 
+`trax-ortal-prod.databand_public.dbnd_run`  dbnd_run
+LEFT JOIN cte_task_run_info on cte_task_run_info.run_id=dbnd_run.id
+WHERE dbnd_run.user = 'auto_deploy'
+AND dbnd_run.dag_id = 'AutoTrainPipeline'
+AND (dbnd_run.state !='failed' or (dbnd_run.state ='failed' and cte_task_run_info.run_id is not null))
+AND dbnd_run.start_time >=  '2021-01-01'
+GROUP BY 
+dbnd_run.state,
+dbnd_run.cloud,
+dbnd_run.user,
+billing_date,
+date
+ORDER BY
+billing_date,
+date
+);
+
+CREATE TEMP TABLE successful_autodeploy_temp AS
+(
+SELECT
+autodeploy_temp.billing_date,
+SUM(autodeploy_temp.number_of_running_hours) AS number_of_running_hours,
+SUM(autodeploy_temp.number_of_runs) AS number_of_runs
+FROM autodeploy_temp
+WHERE autodeploy_temp.state = 'success'
+GROUP BY
+autodeploy_temp.billing_date
+);
+
+
+CREATE TEMP TABLE aws_gcp_cost_training_final_temp AS
+(SELECT 
+aws_cost_training_temp.billing_date,
+aws_cost_training_temp.autodeploy_cost,
+aws_cost_training_temp.autodeploy_cost/aws_cost_training_temp.training_cost as percent_autodeploy_aws,
+IFNULL(discount_per_label_temp.discount_per_label,0) as discount_in_aws,
+gcp_cost
+FROM aws_cost_training_temp aws_cost_training_temp 
+LEFT JOIN gcp_cost_training_temp gcp_cost_training_temp ON STRING(cte_gcp_cost_training.billing_date) = aws_cost_training_temp.billing_date
+LEFT JOIN discount_per_label_temp discount_per_label_temp ON discount_per_label_temp.billing_date = aws_cost_training_temp.billing_date);
+
+
+CREATE MATERIALIZED VIEW `trax-ortal-prod.cloud.cost_per_successful_training_new` AS
+
+SELECT 
+aws_gcp_cost_training_final_temp.billing_date,
+aws_gcp_cost_training_final_temp.autodeploy_cost + (aws_gcp_cost_training_final_temp.discount_in_aws * aws_gcp_cost_training_final_temp.percent_autodeploy_aws) as autodeploy_aws,
+(aws_gcp_cost_training_final_temp.gcp_cost * aws_gcp_cost_training_final_temp.percent_autodeploy_aws) as autodeploy_estimation_gcp,
+aws_gcp_cost_training_final_temp.autodeploy_cost + (aws_gcp_cost_training_final_temp.gcp_cost * percent_autodeploy_aws) + (aws_gcp_cost_training_final_temp.discount_in_aws * aws_gcp_cost_training_final_temp.percent_autodeploy_aws) as autodeploy_cost,
+successful_autodeploy_temp.number_of_running_hours,
+successful_autodeploy_temp.number_of_runs,
+(aws_gcp_cost_training_final_temp.autodeploy_cost + 
+(aws_gcp_cost_training_final_temp.discount_in_aws * aws_gcp_cost_training_final_temp.percent_autodeploy_aws) + 
+(aws_gcp_cost_training_final_temp.gcp_cost * aws_gcp_cost_training_final_temp.percent_autodeploy_aws))
+/successful_autodeploy_temp.number_of_running_hours as cost_per_successful_training_running_time,
+(aws_gcp_cost_training_final_temp.autodeploy_cost + 
+(aws_gcp_cost_training_final_temp.discount_in_aws * aws_gcp_cost_training_final_temp.percent_autodeploy_aws) + 
+(aws_gcp_cost_training_final_temp.gcp_cost * aws_gcp_cost_training_final_temp.percent_autodeploy_aws))
+/successful_autodeploy_temp.number_of_runs as  cost_per_successful_training_count_runs 
+FROM aws_gcp_cost_training_final_temp aws_gcp_cost_training_final_temp
+LEFT JOIN successful_autodeploy_temp ON successful_autodeploy_temp.billing_date = aws_gcp_cost_training_final_temp.billing_date
+where aws_gcp_cost_training_final_temp.billing_date between '2023-01-01' and '2023-09-01';
+
+END
