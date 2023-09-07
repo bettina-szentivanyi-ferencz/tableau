@@ -1,3 +1,6 @@
+DROP VIEW IF EXISTS sandbox.cost_per_successful_training_refactored;
+CREATE VIEW sandbox.cost_per_successful_training_refactored AS
+
 WITH 
 
 cte_aws_cost_network_training  AS
@@ -33,7 +36,6 @@ OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
 OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
 AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
 AND billing_aws_labeled.bill_payer_account_id = '619597279328'
---AND billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
 GROUP BY
 billing_aws_labeled.bill_billing_period_start_date,
 billing_aws_labeled.identity_time_interval,
@@ -313,7 +315,7 @@ LEFT JOIN cte_gcp_cost_training cte_gcp_cost_training ON STRING(cte_gcp_cost_tra
 LEFT JOIN cte_discount_per_label cte_discount_per_label ON cte_discount_per_label.billing_date = cte_aws_cost_training.billing_date)
 
 SELECT 
-cte_aws_gcp_cost_training_final.billing_date,
+DATE(cte_aws_gcp_cost_training_final.billing_date) as billing_date,
 cte_aws_gcp_cost_training_final.autodeploy_cost + (cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_aws,
 (cte_aws_gcp_cost_training_final.gcp_cost * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_estimation_gcp,
 cte_aws_gcp_cost_training_final.autodeploy_cost + (cte_aws_gcp_cost_training_final.gcp_cost * percent_autodeploy_aws) + (cte_aws_gcp_cost_training_final.discount_in_aws * cte_aws_gcp_cost_training_final.percent_autodeploy_aws) as autodeploy_cost,
@@ -329,4 +331,3 @@ cte_successful_autodeploy.number_of_runs,
 /cte_successful_autodeploy.number_of_runs as  cost_per_successful_training_count_runs 
 FROM cte_aws_gcp_cost_training_final cte_aws_gcp_cost_training_final
 LEFT JOIN cte_successful_autodeploy ON cte_successful_autodeploy.billing_date = cte_aws_gcp_cost_training_final.billing_date
-where cte_aws_gcp_cost_training_final.billing_date between '2023-01-01' and '2023-09-01'
