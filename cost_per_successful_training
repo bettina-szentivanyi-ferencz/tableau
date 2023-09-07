@@ -194,7 +194,7 @@ LEFT JOIN UNNEST(credits) as credits
 WHERE billing_gcp_labeled.invoice_month >= '2021-01-01'
 AND lower(sku.description) NOT LIKE '%tax%'
 GROUP BY 
-billing_date,
+billing_gcp_labeled.invoice_month
 project_name,
 credit_type,
 billing_gcp_labeled.cost_allocation
@@ -228,7 +228,7 @@ SUM(CASE
 FROM cloud.billing_aws_labeled billing_aws_labeled
 WHERE  billing_aws_labeled.line_item_line_item_type != 'Tax'
 GROUP BY
-billing_date,
+billing_aws_labeled.bill_billing_period_start_date,
 billing_aws_labeled.line_item_usage_account_id,
 billing_aws_labeled.line_item_line_item_type,
 billing_aws_labeled.cost_allocation
