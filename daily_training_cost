@@ -139,6 +139,7 @@ cte_total_discount.discount_cost,
 SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)) as percent_actual_cost,
 (cte_total_discount.discount_cost * (SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)))) as discount_per_label
 FROM cte_total_discount
+WHERE cost_allocation = 'training'
 GROUP BY 
 cte_total_discount.billing_date,
 cte_total_discount.cost_allocation,
