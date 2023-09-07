@@ -44,10 +44,10 @@ billing_gcp_labeled.cost_allocation
 ),
 
 
-cte_aws_cost_training AS
+cte_aws_cost_distribution  AS
 
 (SELECT 
-FORMAT_DATETIME('%Y-%m-01',bill_billing_period_start_date) as billing_date,
+FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
 billing_aws_labeled.line_item_usage_account_id as project_name,
 billing_aws_labeled.line_item_line_item_type as credit_type,
 billing_aws_labeled.cost_allocation,
@@ -71,33 +71,34 @@ SUM(CASE
 'AWS' as cloud 
 FROM cloud.billing_aws_labeled billing_aws_labeled
 WHERE  billing_aws_labeled.line_item_line_item_type != 'Tax'
-GROUP BY 
-billing_date,
-project_name,
-credit_type,
-billing_aws_labeled.cost_allocation),
+GROUP BY
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.line_item_usage_account_id,
+billing_aws_labeled.line_item_line_item_type,
+billing_aws_labeled.cost_allocation
+),
 
-cte_cost_training AS
+cte_total_cost_distribution  AS
+
 (
-  (
-SELECT
-billing_date,
-project_name,
-credit_type,
-cost_allocation,
-actual_cost,
-cloud
-FROM cte_gcp_cost_training)
+(SELECT 
+cte_gcp_cost_distribution.billing_date,
+cte_gcp_cost_distribution.project_name,
+cte_gcp_cost_distribution.credit_type,
+cte_gcp_cost_distribution.cost_allocation,
+cte_gcp_cost_distribution.actual_cost,
+cte_gcp_cost_distribution.cloud
+FROM cte_gcp_cost_distribution cte_gcp_cost_distribution)
 UNION ALL
-(
-  SELECT
-  billing_date,
-project_name,
-credit_type,
-cost_allocation,
-actual_cost,
-cloud
-FROM cte_aws_cost_training)
+(SELECT
+cte_aws_cost_distribution.billing_date,
+cte_aws_cost_distribution.project_name,
+cte_aws_cost_distribution.credit_type,
+cte_aws_cost_distribution.cost_allocation,
+cte_aws_cost_distribution.actual_cost,
+cte_aws_cost_distribution.cloud
+FROM cte_aws_cost_distribution cte_aws_cost_distribution 
+)
 ),
 
 cte_discount_cost AS
@@ -106,7 +107,7 @@ cte_discount_cost AS
 billing_date,
 credit_type,
 actual_cost
-FROM cte_cost_training  
+FROM cte_total_cost_distribution  
 WHERE project_name = '619597279328'
 AND cloud = 'AWS'
 AND credit_type = 'EdpDiscount'),
