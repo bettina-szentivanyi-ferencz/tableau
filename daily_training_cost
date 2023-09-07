@@ -172,7 +172,7 @@ cte_discount_cppp  as
     FROM cte_discount_per_size),
 
 
-cte_aws_cost_network_training  AS
+te_aws_cost_network_training  AS
 (SELECT
 FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
 FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
@@ -258,6 +258,25 @@ billing_aws_labeled.bill_billing_period_start_date,
 billing_aws_labeled.identity_time_interval,
 cloud,
 databand_tag
+),
+
+cte_total_aws_cost_training  AS
+(
+(SELECT
+ cte_aws_cost_network_training.billing_date,
+ cte_aws_cost_network_training.date,
+ cte_aws_cost_network_training.cloud,
+ cte_aws_cost_network_training.databand_tag,
+ cte_aws_cost_network_training.total_cost_aws
+  from cte_aws_cost_network_training cte_aws_cost_network_training)
+  UNION ALL
+  (SELECT 
+ cte_aws_cost_others_training.billing_date,
+ cte_aws_cost_others_training.date,
+ cte_aws_cost_others_training.cloud,
+ cte_aws_cost_others_training.databand_tag,
+ cte_aws_cost_others_training.total_cost_aws
+from cte_aws_cost_others_training cte_aws_cost_others_training)
 ),
 
 daily_training_aws as
