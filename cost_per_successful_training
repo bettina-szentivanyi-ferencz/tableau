@@ -1,8 +1,7 @@
 WITH 
 
 cte_aws_cost_network_training  AS
-
-(SELECT 
+(SELECT
 FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date,
 FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
 'AWS' as cloud,
@@ -34,10 +33,12 @@ OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-Bytes%'
 OR  billing_aws_labeled.line_item_usage_type LIKE '%AWS-Out-ABytes%')
 AND billing_aws_labeled.line_item_product_code = 'AmazonS3'
 AND billing_aws_labeled.bill_payer_account_id = '619597279328'
-GROUP BY 
-billing_date,
-date, 
-cloud),
+--AND billing_aws_labeled.cost_allocation = 'training' -- added by me, it was not part of the original view
+GROUP BY
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.identity_time_interval,
+cloud,
+databand_tag),
 
 cte_aws_cost_others_training  AS
 (SELECT 
@@ -64,7 +65,7 @@ SUM(CASE
       WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
       savings_plan_savings_plan_effective_cost
       WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
-      (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+      (billing_aws_labeled.savings_plan_total_commitment_to_date - savings_plan_used_commitment)
       WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
       0
       WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
@@ -81,11 +82,11 @@ FROM cloud.billing_aws_labeled billing_aws_labeled
 WHERE billing_aws_labeled.cost_allocation = 'training'
 AND FORMAT_DATETIME('%Y-%m-01',bill_billing_period_start_date) >= '2021-01-01'
 GROUP BY 
-billing_date,
-date,
+billing_aws_labeled.bill_billing_period_start_date,
+billing_aws_labeled.identity_time_interval,
 cloud,
 databand_tag
-)
+),
 
 cte_total_aws_cost_training  AS
 (
