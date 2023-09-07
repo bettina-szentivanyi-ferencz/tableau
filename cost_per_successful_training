@@ -284,15 +284,20 @@ WHERE cte_total_cost_distribution.project_name = '619597279328'
 AND cte_total_cost_distribution.cloud = 'AWS'
 ),
 
-cte_discount_training AS
+
+cte_discount_per_label AS
 (
 SELECT 
 cte_total_discount.billing_date,
+cte_total_discount.cost_allocation,
+cte_total_discount.discount_cost,
+SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)) as percent_actual_cost,
 (cte_total_discount.discount_cost * (SUM(cte_total_discount.actual_cost)/ SUM(DISTINCT(cte_total_discount.total_cost_before_dicount)))) as discount_per_label
-FROM cte_total_discount cte_total_discount
+FROM cte_total_discount
 WHERE cost_allocation = 'training'
 GROUP BY 
 cte_total_discount.billing_date,
+cte_total_discount.cost_allocation,
 cte_total_discount.discount_cost
 ),
 
@@ -301,11 +306,11 @@ cte_aws_gcp_cost_training_final AS
 cte_aws_cost_training.billing_date,
 cte_aws_cost_training.autodeploy_cost,
 cte_aws_cost_training.autodeploy_cost/cte_aws_cost_training.training_cost as percent_autodeploy_aws,
-IFNULL(cte_discount_training.discount_per_label,0) as discount_in_aws,
+IFNULL(cte_discount_per_label.discount_per_label,0) as discount_in_aws,
 gcp_cost
 FROM cte_aws_cost_training cte_aws_cost_training 
 LEFT JOIN cte_gcp_cost_training cte_gcp_cost_training ON STRING(cte_gcp_cost_training.billing_date) = cte_aws_cost_training.billing_date
-LEFT JOIN cte_discount_training cte_discount_training ON cte_discount_training .billing_date = cte_aws_cost_training.billing_date)
+LEFT JOIN cte_discount_per_label cte_discount_per_label ON cte_discount_per_label.billing_date = cte_aws_cost_training.billing_date)
 
 SELECT 
 cte_aws_gcp_cost_training_final.billing_date,
