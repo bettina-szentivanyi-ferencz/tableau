@@ -1,0 +1,93 @@
+DROP VIEW IF EXISTS sandbox.calendar_dim;
+CREATE VIEW sandbox.calendar_dim AS
+
+with
+
+-- no option currently to add translations to calendar values, like Weekdays, Month, etc...
+calendar_dim AS
+(
+SELECT
+    date as date_pk,
+    date,
+    extract(year from date) || ' W' || format_date ('%W', date (date)) as year_week,
+    min(date) over (partition by extract(year from date) || 'W ' || format_date ('%W', date (date))) as year_week_id,
+    extract(year from date) || ' Q' || extract(quarter from date) as year_quarter,
+    min(date) over (partition by extract(year from date) || ' Q' || extract(quarter from date)) as year_quarter_id,
+    extract(year from date) || ' ' ||
+    case
+        when format_date ('%m', date (date)) = '01' then 'Jan'
+        when format_date ('%m', date (date)) = '02' then 'Feb'
+        when format_date ('%m', date (date)) = '03' then 'March'
+        when format_date ('%m', date (date)) = '04' then 'Apr'
+        when format_date ('%m', date (date)) = '05' then 'May'
+        when format_date ('%m', date (date)) = '06' then 'June'
+        when format_date ('%m', date (date)) = '07' then 'July'
+        when format_date ('%m', date (date)) = '08' then 'Aug'
+        when format_date ('%m', date (date)) = '09' then 'Sept'
+        when format_date ('%m', date (date)) = '10' then 'Oct'
+        when format_date ('%m', date (date)) = '11' then 'Nov'
+        when format_date ('%m', date (date)) = '12' then 'Dec'
+    end as year_month,
+    min(date) over (partition by format_date ('%Y %B', date (date))) as year_month_id, -- sort year_month
+    case
+        when format_date ('%m', date (date)) = '01' then 'January'
+        when format_date ('%m', date (date)) = '02' then 'February'
+        when format_date ('%m', date (date)) = '03' then 'March'
+        when format_date ('%m', date (date)) = '04' then 'April'
+        when format_date ('%m', date (date)) = '05' then 'May'
+        when format_date ('%m', date (date)) = '06' then 'June'
+        when format_date ('%m', date (date)) = '07' then 'July'
+        when format_date ('%m', date (date)) = '08' then 'August'
+        when format_date ('%m', date (date)) = '09' then 'September'
+        when format_date ('%m', date (date)) = '10' then 'October'
+        when format_date ('%m', date (date)) = '11' then 'November'
+        when format_date ('%m', date (date)) = '12' then 'December'
+    end as month,
+    format_date ('%m', date (date)) as month_id, -- sort month
+    extract(year from date) as year, -- can be sorted by itself
+    'W' || format_date ('%W', date (date)) as week, -- can be sorted by itself
+    extract(dayofweek from date) as weekday_id, -- sort weekday
+    case
+        when extract(dayofweek from date) = 1 then 'Sunday'
+        when extract(dayofweek from date) = 2 then 'Monday'
+        when extract(dayofweek from date) = 3 then 'Tuesday'
+        when extract(dayofweek from date) = 4 then 'Wednesday'
+        when extract(dayofweek from date) = 5 then 'Thursday'
+        when extract(dayofweek from date) = 6 then 'Friday'
+        when extract(dayofweek from date) = 7 then 'Saturday'
+    end as weekday,
+  Case WHEN date BETWEEN date_trunc(date_sub(current_date(), interval 0 month), month) AND last_day(date_sub(current_date(), interval 0 month), month) THEN 1 END AS current_month,
+  Case WHEN date BETWEEN date_trunc(date_sub(current_date(), interval 1 month), month) AND last_day(date_sub(current_date(), interval 1 month), month) THEN 1 END AS previous_month,
+  Case WHEN date BETWEEN last_day(date_sub(current_date(), interval 3 month), month) AND current_date()  THEN 1 END AS last_three_month,
+  Case WHEN date BETWEEN last_day(date_sub(current_date(), interval 6 month), month) AND current_date() THEN 1 END AS last_six_month
+ 
+
+
+FROM
+UNNEST(
+	GENERATE_DATE_ARRAY(
+		DATE_TRUNC(DATE '2021-01-01', YEAR) , -- first_year param = take the year from the first date from config
+    		CURRENT_DATE(),
+		INTERVAL 1 DAY
+	)
+) as date
+order by date asc)
+
+Select 
+calendar_dim.date_pk,
+calendar_dim.date,
+calendar_dim.year_week,
+calendar_dim.year_week_id,
+calendar_dim.year_quarter,
+calendar_dim.year_quarter_id,
+calendar_dim.year_month,
+calendar_dim.year_month_id,
+calendar_dim.year,
+calendar_dim.current_month,
+calendar_dim.previous_month,
+calendar_dim.last_three_month,
+calendar_dim.last_six_month
+
+
+
+from calendar_dim
