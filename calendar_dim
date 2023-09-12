@@ -3,7 +3,15 @@ CREATE VIEW sandbox.calendar_dim AS
 
 with
 
--- no option currently to add translations to calendar values, like Weekdays, Month, etc...
+cte_aws_list_of_dates_by_month_year AS
+
+(
+
+SELECT DISTINCT
+    DATE(FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10)))) as date_full,
+    FROM `cloud.billing_aws_labeled` billing_aws_labeled
+),
+
 calendar_dim AS
 (
 SELECT
@@ -88,6 +96,7 @@ calendar_dim.previous_month,
 calendar_dim.last_three_month,
 calendar_dim.last_six_month
 
+FROM calendar_dim
 
-
-from calendar_dim
+JOIN  cte_aws_list_of_dates_by_month_year  ON calendar_dim.date = cte_aws_list_of_dates_by_month_year.date_full
+order by calendar_dim.date asc ;
