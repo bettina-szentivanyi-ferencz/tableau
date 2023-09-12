@@ -1,0 +1,40 @@
+DROP VIEW IF EXISTS sandbox.databand_agg_refactored;
+CREATE VIEW sandbox.databand_agg_refactored AS
+
+WITH 
+
+
+cte_task_run_info AS
+(
+SELECT DISTINCT 
+dbnd_task_run_v2.run_id FROM 
+(select run_id,id FROM databand_public.dbnd_task_run_v2 WHERE is_system=false ) dbnd_task_run_v2
+JOIN databand_public.dbnd_task_run_attempt dbnd_task_run_attempt on dbnd_task_run_attempt.task_run_id=dbnd_task_run_v2.id
+JOIN (SELECT uid FROM databand_public.dbnd_error  WHERE msg != 'exiting band due to: Some of datasets created are not valid, look for logs for more info') dbnd_error ON dbnd_task_run_attempt.latest_error_uid = dbnd_error.uid
+)
+
+
+SELECT 
+dbnd_run.state,
+dbnd_run.cloud,
+dbnd_run.user,
+DATE(FORMAT_DATETIME('%Y-%m-01',dbnd_run.start_time)) as billing_date,
+FORMAT_DATETIME('%Y-%m-%d',dbnd_run.start_time) as date,
+extract(hour from SUM(dbnd_run.end_time - dbnd_run.start_time)) as number_of_running_hours,
+COUNT(dbnd_run.id) as number_of_runs
+FROM 
+`trax-ortal-prod.databand_public.dbnd_run`  dbnd_run
+LEFT JOIN cte_task_run_info on cte_task_run_info.run_id=dbnd_run.id
+WHERE dbnd_run.user = 'auto_deploy'
+AND dbnd_run.dag_id = 'AutoTrainPipeline'
+AND (dbnd_run.state !='failed' or (dbnd_run.state ='failed' and cte_task_run_info.run_id is not null))
+AND dbnd_run.start_time >=  '2021-01-01'
+GROUP BY 
+dbnd_run.state,
+dbnd_run.cloud,
+dbnd_run.user,
+billing_date,
+date
+ORDER BY
+billing_date,
+date;
