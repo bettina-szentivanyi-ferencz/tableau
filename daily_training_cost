@@ -342,7 +342,7 @@ discount_per_day)
 (
 (select
 billing_date,
-date,
+DATE(date) as date,
 cloud,
 databand_tag,
 cloud_and_tag,
@@ -353,7 +353,7 @@ from daily_training_aws)
 UNION ALL
 (select
 billing_date,
-date,
+DATE(date) as date,
 cloud,
 databand_tag,
 cloud_and_tag,
