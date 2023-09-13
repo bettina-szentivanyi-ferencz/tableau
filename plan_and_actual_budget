@@ -1,4 +1,5 @@
-
+DROP VIEW IF EXISTS sandbox.plan_and_actual_budget_refactored;
+CREATE VIEW sandbox.plan_and_actual_budget_refactored AS
 
 WITH 
 
@@ -19,8 +20,8 @@ SELECT
 cte_aws_number_of_days_by_month_plan AS 
 (
 SELECT
-    cte_aws_list_of_dates_by_month_year.date_month,
-    COUNT(cte_aws_list_of_dates_by_month_year.date_full) OVER(PARTITION BY cte_aws_list_of_dates_by_month_year.date_month) as number_of_days
+    DATE(cte_aws_list_of_dates_by_month_year.date_month) as date_month,
+    COUNT(cte_aws_list_of_dates_by_month_year.date_full) OVER(PARTITION BY cte_aws_list_of_dates_by_month_year.date_month) as number_of_days_plan
     FROM cte_aws_list_of_dates_by_month_year cte_aws_list_of_dates_by_month_year
     GROUP BY 
     cte_aws_list_of_dates_by_month_year.date_month,
@@ -45,7 +46,7 @@ cte_aws_list_of_dates_by_month_year_actual AS
 
 SELECT
     cte_aws_list_of_dates_by_month_year_actual.date_month,
-    COUNT(cte_aws_list_of_dates_by_month_year_actual.date_full) OVER(PARTITION BY date_month) as number_of_days
+    COUNT(cte_aws_list_of_dates_by_month_year_actual.date_full) OVER(PARTITION BY date_month) as number_of_days_actual
     FROM cte_aws_list_of_dates_by_month_year_actual
 GROUP BY 
 cte_aws_list_of_dates_by_month_year_actual.date_month,
@@ -56,7 +57,7 @@ cte_aws_list_of_dates_by_month_year_actual.date_full
 cte_aws_cost_actual AS
 
 (SELECT 
-FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date) as billing_date_aws_actual,
+DATE(FORMAT_DATETIME('%Y-%m-01',billing_aws_labeled.bill_billing_period_start_date)) as billing_date_aws_actual,
 SUM(billing_aws_labeled.line_item_unblended_cost) as actual_aws_cost
 FROM cloud.billing_aws_labeled billing_aws_labeled
 WHERE  billing_aws_labeled.line_item_line_item_type != 'Tax'
@@ -67,7 +68,7 @@ billing_aws_labeled.bill_billing_period_start_date),
 cte_gcp_cost_actual AS
 
 (SELECT 
-  billing_gcp_labeled.invoice_month AS billing_date_gcp_actual,
+  DATE(billing_gcp_labeled.invoice_month) AS billing_date_gcp_actual,
     SUM(billing_gcp_labeled.cost)
       + SUM(IFNULL((SELECT SUM(c.amount)
                   FROM UNNEST(credits) c), 0))
@@ -81,7 +82,9 @@ billing_gcp_labeled.invoice_month),
 cte_aop_month_number AS
 
 (SELECT
-*,
+xls_rnd_aop.updated_time,
+xls_rnd_aop.gcp_planned,
+xls_rnd_aop.aws_planned,
 (case 
 when lower(month) = 'january' then '01' 
 when lower(month) = 'february' then '02' 
@@ -95,22 +98,52 @@ when lower(month) = 'september' then '09'
 when lower(month) = 'october' then '10' 
 when lower(month) = 'november' then '11' 
 when lower(month) = 'december' then '12' 
-end) as month_number
-FROM `secured.xls_rnd_aop`),
+end) as month_number,
+xls_rnd_aop.year
+FROM `secured.xls_rnd_aop` xls_rnd_aop),
 
+cte_billing_date_aop AS
 
-cte_aop_table AS 
-(
+(SELECT
+cte_aop_month_number.updated_time,
+cte_aop_month_number.gcp_planned,
+cte_aop_month_number.aws_planned,
+DATE(FORMAT_DATETIME('%Y-%m-01' ,PARSE_DATE('%m/%Y',(CONCAT(cte_aop_month_number.month_number,'/',cte_aop_month_number.year))))) as billing_date_aop,
+SUM(cte_aop_month_number.gcp_planned) OVER(PARTITION BY cte_aop_month_number.year, cte_aop_month_number.updated_time) as target_gcp_planned,
+SUM(cte_aop_month_number.aws_planned) OVER(PARTITION BY cte_aop_month_number.year, cte_aop_month_number.updated_time) as target_aws_planned,
+cte_aop_month_number.year
+from cte_aop_month_number cte_aop_month_number
+)
+
 
 SELECT
-updated_time,
-FORMAT_DATETIME('%Y-%m-01' ,PARSE_DATE('%m/%Y',(CONCAT(month_number,'/',year)))) as billing_date_aop,
-gcp_planned,
-aws_planned,
-SUM(gcp_planned) OVER(PARTITION BY year, updated_time) as target_gcp_planned,
-SUM(aws_planned) OVER(PARTITION BY year, updated_time) as target_aws_planned,
-FROM cte_aop_month_number
-LEFT JOIN cte_aws_cost_actual cte_aws_cost_actual on cte_aop_month_number.billing_date_aop=cte_aws_cost_actual.billing_date_aws_actual
-LEFT JOIN cte_gcp_cost_actual cte_gcp_cost_actual on cte_aop_month_number.billing_date_aop=cte_gcp_cost_actual.billing_date_gcp_actual
-LEFT JOIN cte_number_of_days_actual   cte_number_of_days_actual on   cte_aop_month_number.billing_date_aop=cte_number_of_days_actual.date_month
-LEFT JOIN cte_aws_number_of_days_by_month_plan cte_aws_number_of_days_by_month_plan on   cte_aop_month_number.billing_date_aop=cte_aws_number_of_days_by_month_plan.date_month)
+cte_billing_date_aop.updated_time,
+cte_billing_date_aop.billing_date_aop,
+cte_billing_date_aop.gcp_planned,
+cte_billing_date_aop.aws_planned,
+cte_billing_date_aop.target_gcp_planned,
+cte_billing_date_aop.target_aws_planned,
+cte_aws_cost_actual.actual_aws_cost,
+cte_gcp_cost_actual.actual_gcp_cost,
+cte_number_of_days_actual.number_of_days_actual,
+cte_aws_number_of_days_by_month_plan.number_of_days_plan
+FROM cte_billing_date_aop
+LEFT JOIN cte_aws_cost_actual cte_aws_cost_actual on cte_billing_date_aop.billing_date_aop=cte_aws_cost_actual.billing_date_aws_actual
+LEFT JOIN cte_gcp_cost_actual cte_gcp_cost_actual on cte_billing_date_aop.billing_date_aop=cte_gcp_cost_actual.billing_date_gcp_actual
+LEFT JOIN cte_number_of_days_actual   cte_number_of_days_actual on   cte_billing_date_aop.billing_date_aop=cte_number_of_days_actual.date_month
+LEFT JOIN cte_aws_number_of_days_by_month_plan cte_aws_number_of_days_by_month_plan on   cte_billing_date_aop.billing_date_aop=cte_aws_number_of_days_by_month_plan.date_month
+group by 
+cte_billing_date_aop.updated_time,
+cte_billing_date_aop.billing_date_aop,
+cte_billing_date_aop.gcp_planned,
+cte_billing_date_aop.aws_planned,
+cte_billing_date_aop.target_gcp_planned,
+cte_billing_date_aop.target_aws_planned,
+cte_billing_date_aop.year,
+cte_aws_cost_actual.actual_aws_cost,
+cte_gcp_cost_actual.actual_gcp_cost,
+cte_number_of_days_actual.number_of_days_actual,
+cte_aws_number_of_days_by_month_plan.number_of_days_plan
+;
+
+
