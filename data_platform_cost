@@ -28,8 +28,8 @@ WHERE (LOWER(billing_aws_labeled.cost_allocation) LIKE '%data_platform%'
     AND FORMAT_DATETIME('%Y-%m-%d',bill_billing_period_start_date) >= '2021-01-01'
     AND billing_aws_labeled.resource_tags_user_service NOT IN ('selector','vpn', 'selector-reader', 'user_management', 'kpi_monitoring', 'recognition_offline','elb')
 GROUP BY 
-billing_aws_labeled.identity_time_interval,
-billing_aws_labeled.line_item_product_code
+date,
+resource
 ORDER BY cost DESC)
 UNION ALL
 (
@@ -43,7 +43,7 @@ WHERE (LOWER(billing_gcp_labeled.cost_allocation) LIKE '%data_platform%'
     OR LOWER(billing_gcp_labeled.cost_allocation) = 'platform')
     AND billing_gcp_labeled.invoice_month >= '2021-01-01'
 GROUP BY 
-billing_gcp_labeled.usage_start_time,
-service.description
+date,
+resource
 ORDER BY cost DESC
 )
