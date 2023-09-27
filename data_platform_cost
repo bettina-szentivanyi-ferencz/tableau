@@ -1,0 +1,49 @@
+
+DROP VIEW IF EXISTS sandbox.data_platform_cost;
+CREATE VIEW sandbox.data_platform_cost AS
+
+(SELECT
+    FORMAT_DATETIME('%Y-%m-%d',DATE(substring(billing_aws_labeled.identity_time_interval,1,10))) as date,
+    billing_aws_labeled.line_item_product_code AS resource,
+    SUM(CASE
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanCoveredUsage') THEN
+          billing_aws_labeled.savings_plan_savings_plan_effective_cost
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanRecurringFee') THEN
+          (billing_aws_labeled.savings_plan_total_commitment_to_date - billing_aws_labeled.savings_plan_used_commitment)
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanNegation') THEN
+          0
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'SavingsPlanUpfrontFee') THEN
+          0
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'DiscountedUsage') THEN
+          billing_aws_labeled.reservation_effective_cost
+          WHEN (billing_aws_labeled.line_item_line_item_type = 'RIFee') THEN
+          (billing_aws_labeled.reservation_unused_amortized_upfront_fee_for_billing_period + billing_aws_labeled.reservation_unused_recurring_fee)
+          WHEN ((billing_aws_labeled.line_item_line_item_type = 'Fee')
+              AND (billing_aws_labeled.reservation_reservation_a_r_n <> '')) THEN
+          0
+          ELSE billing_aws_labeled.line_item_unblended_cost END) as cost
+FROM cloud.billing_aws_labeled billing_aws_labeled
+WHERE (LOWER(billing_aws_labeled.cost_allocation) LIKE '%data_platform%'
+    OR LOWER(billing_aws_labeled.cost_allocation) = 'platform')
+    AND FORMAT_DATETIME('%Y-%m-%d',bill_billing_period_start_date) >= '2021-01-01'
+    AND billing_aws_labeled.resource_tags_user_service NOT IN ('selector','vpn', 'selector-reader', 'user_management', 'kpi_monitoring', 'recognition_offline','elb')
+GROUP BY 
+billing_aws_labeled.identity_time_interval,
+billing_aws_labeled.line_item_product_code
+ORDER BY cost DESC)
+UNION ALL
+(
+SELECT
+    FORMAT_DATETIME('%Y-%m-%d', EXTRACT(date FROM billing_gcp_labeled.usage_start_time)) as date,
+    service.description AS resource,
+    SUM(billing_gcp_labeled.cost) + SUM(IFNULL(credits.amount,0)) as cost
+FROM cloud.billing_gcp_labeled billing_gcp_labeled
+LEFT JOIN UNNEST(billing_gcp_labeled.credits) as credits
+WHERE (LOWER(billing_gcp_labeled.cost_allocation) LIKE '%data_platform%'
+    OR LOWER(billing_gcp_labeled.cost_allocation) = 'platform')
+    AND billing_gcp_labeled.invoice_month >= '2021-01-01'
+GROUP BY 
+billing_gcp_labeled.usage_start_time,
+service.description
+ORDER BY cost DESC
+)
