@@ -1,20 +1,21 @@
+
 DROP VIEW IF EXISTS sandbox.kengine_run_times_refactored;
 CREATE VIEW sandbox.kengine_run_times_refactored AS
 
 select distinct 
-  eventsink_byday.timestamp,
-	eventsink_byday.project_name,
-	eventsink_byday.session_uid,
-	eventsink_byday.scene_uid,
-	eventsink_byday.processing_time,
-	eventsink_byday.event_name,
-	JSON_EXTRACT_SCALAR(projects_project. _json_data,"$.is_using_flow_management") is_using_flow_management,
+	factory_eventsink.timestamp,
+	factory_eventsink.project_name,
+	factory_eventsink.session_uid,
+	factory_eventsink.scene_uid,
+	factory_eventsink.processing_time,
+	factory_eventsink.event_name,
+	JSON_EXTRACT_SCALAR(mongodb_projects_project. _json_data,"$.is_using_flow_management") is_using_flow_management,
 from
-	`raw.eventsink_byday` eventsink_byday
-join `dwh_mongodb.projects_project` projects_project on eventsink_byday.project_name = p.project_name
+	`thelake.factory_eventsink` factory_eventsink --original table:`raw.eventsink_byday`
+join `thelake.mongodb_projects_project` mongodb_projects_project on factory_eventsink.project_name = p.project_name --original table:`dwh_mongodb.projects_project`
 where
-	eventsink_byday.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(),interval 14 day)
-	and eeventsink_byday.event_name in 
+	factory_eventsink.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(),interval 14 day)
+	and efactory_eventsink.event_name in 
   ("RECALCULATION_ENDED",
 "RECALCULATION_ENDED_LIVE",
 "SCENE_CALCULATED",
