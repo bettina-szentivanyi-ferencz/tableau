@@ -12,10 +12,10 @@ select distinct
 	JSON_EXTRACT_SCALAR(mongodb_projects_project. _json_data,"$.is_using_flow_management") is_using_flow_management,
 from
 	`raw.eventsink_byday` eventsink_byday 
-join `thelake.mongodb_projects_project` mongodb_projects_project on eventsink_byday.project_name = p.project_name --original table:`dwh_mongodb.projects_project`
+join `thelake.mongodb_projects_project` mongodb_projects_project on eventsink_byday.project_name = mongodb_projects_project.project_name --original table:`dwh_mongodb.projects_project`
 where
 	eventsink_byday.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(),interval 14 day)
-	and eeventsink_byday.event_name in 
+	and eventsink_byday.event_name in 
   ("RECALCULATION_ENDED",
 "RECALCULATION_ENDED_LIVE",
 "SCENE_CALCULATED",
