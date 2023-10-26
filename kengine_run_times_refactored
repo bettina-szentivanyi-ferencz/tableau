@@ -1,0 +1,29 @@
+DROP VIEW IF EXISTS sandbox.kengine_run_times_refactored;
+CREATE VIEW sandbox.kengine_run_times_refactored AS
+
+select distinct 
+  eventsink_byday.timestamp,
+	eventsink_byday.project_name,
+	eventsink_byday.session_uid,
+	eventsink_byday.scene_uid,
+	eventsink_byday.processing_time,
+	eventsink_byday.event_name,
+	JSON_EXTRACT_SCALAR(projects_project. _json_data,"$.is_using_flow_management") is_using_flow_management,
+from
+	`raw.eventsink_byday` eventsink_byday
+join `dwh_mongodb.projects_project` projects_project on eventsink_byday.project_name = p.project_name
+where
+	eventsink_byday.timestamp >= TIMESTAMP_SUB(CURRENT_TIMESTAMP(),interval 14 day)
+	and eeventsink_byday.event_name in 
+  ("RECALCULATION_ENDED",
+"RECALCULATION_ENDED_LIVE",
+"SCENE_CALCULATED",
+"SCENE_CALCULATED-LIVE",
+"SCENE_CALCULATED_LIVE",
+"SCENE_OFFLINE-CALCULATED",
+"SESSION_CALCULATED",
+"SESSION_CALCULATED-LIVE",
+"SESSION_CALCULATED-LIVE_LIVE",
+"SESSION_CALCULATED_LIVE",
+"SESSION_COMPLETED-LIVE"
+);
