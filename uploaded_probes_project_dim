@@ -1,0 +1,10 @@
+create or replace table sandbox.uploaded_probes_project_dim as
+
+SELECT  
+
+
+jira_project_name,
+jira_region, 
+jira_project_phase, 
+jira_project_manager
+FROM `dwh.project` 
