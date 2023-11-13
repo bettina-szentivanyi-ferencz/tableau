@@ -1,0 +1,90 @@
+
+DROP VIEW IF EXISTS sandbox.uploaded_probes_refactored;
+CREATE VIEW sandbox.uploaded_probes_refactored AS
+
+
+with cte_smart_projects_project
+as
+(
+
+		select
+			parse_date('%Y%m%d',
+			cast(smart_projects_project._snapshot_date as string)) _snapshot_date,
+			smart_projects_project.project_name,
+			excluded_smart_template
+		from
+			`trax-ortal-prod.dwh.smart_projects_project` smart_projects_project
+		cross join unnest(excluded_smart_template) as excluded_smart_template
+		where
+			smart_projects_project._snapshot_date in 
+                                                 (
+			select
+				max(smart_projects_project._snapshot_date)
+			from
+				`trax-ortal-prod.dwh.smart_projects_project`)
+),
+
+
+cte_probe_ignored
+as 
+( 
+    select
+			farm_fingerprint(concat(eventsink_byday.project_name ,
+			cast(eventsink_byday.probe_id as string))) as test
+		from
+			`raw.eventsink_byday` eventsink_byday
+		where
+			date(timestamp) >= '2020-01-01'
+				and eventsink_byday.event_name = 'PROBE_IGNORED'
+				and eventsink_byday.probe_id is not null
+),
+
+cte_eventsink_byday
+
+as 
+(
+
+	select
+		Date(eventsink_byday.timestamp) as uploaded_date_utc,
+		Date(eventsink_byday.timestamp,
+		project.jira_project_timezone) as uploaded_date_project_timezone,
+		eventsink_byday.project_name,
+		eventsink_byday.scene_type_uid,
+		eventsink_byday.probe_id ,
+		cte_probe_ignored.test,
+		cte_smart_projects_project.excluded_smart_template,
+		( case when cte_probe_ignored.test is not null then 1
+			else 0
+		end) as is_deleted_probe,
+		( case when cte_smart_projects_project.excluded_smart_template is not null then 1
+			else 0
+		end) as is_excluded_smart_template,
+		row_number() over(partition by eventsink_byday.event_name,
+		eventsink_byday.project_name,
+		eventsink_byday.scene_type_uid,
+		eventsink_byday.probe_id
+	  order by
+		timestamp) as rownum
+	from
+		`raw.eventsink_byday` eventsink_byday
+	left join `dwh.project` project on eventsink_byday.project_name = project.mongo_project_name
+  left join cte_probe_ignored on farm_fingerprint(concat(eventsink_byday.project_name ,ifnull(cast(eventsink_byday.probe_id as string),'NA'))) = cte_probe_ignored.test
+  left join cte_smart_projects_project on cte_smart_projects_project.project_name = eventsink_byday.project_name and cte_smart_projects_project.excluded_smart_template = eventsink_byday.scene_type_uid
+  where 1 = 1 
+	and date(timestamp) >= '2020-01-01' 
+	and wave_type = 'primary' 
+	and event_name in('PROBE_UPLOADED')
+)
+
+select 
+    cte_eventsink_byday.uploaded_date_utc,
+    cte_eventsink_byday.uploaded_date_project_timezone,
+    cte_eventsink_byday.project_name,
+    cte_eventsink_byday.scene_type_uid,
+    cte_eventsink_byday.probe_id,
+    cte_eventsink_byday.is_deleted_probe,
+    cte_eventsink_byday.is_excluded_smart_template
+FROM cte_eventsink_byday 
+where cte_eventsink_byday.uploaded_date_utc>= date_sub(current_date(), INTERVAL 3 MONTH)
+and cte_eventsink_byday.uploaded_date_utc<current_date()
+and 	rownum = 1
