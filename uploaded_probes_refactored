@@ -2,7 +2,6 @@
 DROP VIEW IF EXISTS sandbox.uploaded_probes_refactored;
 CREATE VIEW sandbox.uploaded_probes_refactored AS
 
-
 with cte_smart_projects_project
 as
 (
@@ -32,7 +31,8 @@ as
 		from
 			`raw.eventsink_byday` eventsink_byday
 		where
-			date(timestamp) >= '2020-01-01'
+       date(timestamp)>= date_sub(current_date(), INTERVAL 3 MONTH)
+        and date(timestamp)<current_date()
 				and eventsink_byday.event_name = 'PROBE_IGNORED'
 				and eventsink_byday.probe_id is not null
 ),
@@ -46,8 +46,6 @@ as
 		Date(eventsink_byday.timestamp) as uploaded_date_utc,
 		Date(eventsink_byday.timestamp,
 		project.jira_project_timezone) as uploaded_date_project_timezone,
-		DATE_TRUNC(Date(eventsink_byday.timestamp), MONTH) AS uploaded_date_utc_month,
-		DATE_TRUNC(Date(eventsink_byday.timestamp), MONTH) AS uploaded_date_project_timezone_month,
 		eventsink_byday.project_name,
 		eventsink_byday.scene_type_uid,
 		eventsink_byday.probe_id ,
@@ -74,34 +72,22 @@ as
 	and date(timestamp) >= '2020-01-01' 
 	and wave_type = 'primary' 
 	and event_name in('PROBE_UPLOADED')
+  and Date(eventsink_byday.timestamp)>= date_sub(current_date(), INTERVAL 3 MONTH)
+  and Date(eventsink_byday.timestamp)<current_date())
 
-)
+
 
 select 
-    cte_eventsink_byday.uploaded_date_utc,
-    cte_eventsink_byday.uploaded_date_project_timezone,
-		cte_eventsink_byday.uploaded_date_utc_month,
-		cte_eventsink_byday.uploaded_date_project_timezone_month,
+		cte_eventsink_byday.uploaded_date_utc,
+		cte_eventsink_byday.uploaded_date_project_timezone,
     cte_eventsink_byday.project_name,
-    cte_eventsink_byday.scene_type_uid,
-    cte_eventsink_byday.probe_id,
-    cte_eventsink_byday.is_deleted_probe,
-    cte_eventsink_byday.is_excluded_smart_template,
     count(cte_eventsink_byday.probe_id) as total_probes,
     count(case when is_excluded_smart_template=1 then cte_eventsink_byday.probe_id else null end) as total_excluded_smart_probes,
     count(case when is_deleted_probe=0 and is_excluded_smart_template=0  then cte_eventsink_byday.probe_id else null end) as total_probes_exclude_deleted_and_smartexcluded,
     count(case when is_deleted_probe=1 then cte_eventsink_byday.probe_id else null end) as total_deleted_probes   
 FROM cte_eventsink_byday 
 where  rownum = 1
-and uploaded_date_utc>= date_sub(current_date(), INTERVAL 3 MONTH)
-and uploaded_date_utc<current_date()
 group by
-    cte_eventsink_byday.uploaded_date_utc,
-    cte_eventsink_byday.uploaded_date_project_timezone,
-		cte_eventsink_byday.uploaded_date_utc_month,
-		cte_eventsink_byday.uploaded_date_project_timezone_month,
-    cte_eventsink_byday.project_name,
-    cte_eventsink_byday.scene_type_uid,
-    cte_eventsink_byday.probe_id,
-    cte_eventsink_byday.is_deleted_probe,
-    cte_eventsink_byday.is_excluded_smart_template
+		cte_eventsink_byday.uploaded_date_utc,
+		cte_eventsink_byday.uploaded_date_project_timezone,
+    cte_eventsink_byday.project_name
