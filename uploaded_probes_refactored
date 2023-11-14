@@ -46,6 +46,8 @@ as
 		Date(eventsink_byday.timestamp) as uploaded_date_utc,
 		Date(eventsink_byday.timestamp,
 		project.jira_project_timezone) as uploaded_date_project_timezone,
+		DATE_TRUNC(Date(eventsink_byday.timestamp), MONTH) AS uploaded_date_utc_month,
+		DATE_TRUNC(Date(eventsink_byday.timestamp), MONTH) AS uploaded_date_project_timezone_month,
 		eventsink_byday.project_name,
 		eventsink_byday.scene_type_uid,
 		eventsink_byday.probe_id ,
@@ -78,6 +80,8 @@ as
 select 
     cte_eventsink_byday.uploaded_date_utc,
     cte_eventsink_byday.uploaded_date_project_timezone,
+		cte_eventsink_byday.uploaded_date_utc_month,
+		cte_eventsink_byday.uploaded_date_project_timezone_month,
     cte_eventsink_byday.project_name,
     cte_eventsink_byday.scene_type_uid,
     cte_eventsink_byday.probe_id,
@@ -94,6 +98,8 @@ and uploaded_date_utc<current_date()
 group by
     cte_eventsink_byday.uploaded_date_utc,
     cte_eventsink_byday.uploaded_date_project_timezone,
+		cte_eventsink_byday.uploaded_date_utc_month,
+		cte_eventsink_byday.uploaded_date_project_timezone_month,
     cte_eventsink_byday.project_name,
     cte_eventsink_byday.scene_type_uid,
     cte_eventsink_byday.probe_id,
